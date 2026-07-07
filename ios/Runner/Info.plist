@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Movezy Driver App</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>movezy_driver_app</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(FLUTTER_BUILD_NAME)</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<!-- Camera -->
+	<key>NSCameraUsageDescription</key>
+	<string>Movezy needs camera access to capture KYC documents and vehicle photos.</string>
+
+	<!-- Photo Library -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Movezy needs photo library access to upload vehicle and document images.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Movezy needs to save captured photos to your library.</string>
+
+	<!-- Location -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Movezy needs your location to show nearby bookings and navigate to pickup points.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Movezy needs your location at all times to track rides and show you to nearby customers.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Movezy needs background location to keep tracking active during rides.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>fetch</string>
+	</array>
+
+	<!-- Microphone (may be needed for calls) -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Movezy needs microphone access for in-app calls with customers.</string>
+
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+</dict>
+</plist>
