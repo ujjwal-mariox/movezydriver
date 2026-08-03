@@ -142,8 +142,10 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
                     height: MediaQuery.of(context).size.height * 0.7,
                     child: const Center(child: CircularProgressIndicator()),
                   )
+                // No fixed height: pinning this to the screen height capped the Stack's
+                // Column below its own content on short devices, so it overflowed instead
+                // of scrolling in the SingleChildScrollView above.
                 : SizedBox(
-                    height: MediaQuery.of(context).size.height,
                     width: MediaQuery.of(context).size.width,
                     child: Stack(
                       children: [
@@ -271,14 +273,20 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
                                         child: Row(
                                           children: [
                                             const SizedBox(width: 10),
-                                            Text(
-                                              "Referral Code: $_referralCode",
-                                              style: const TextStyle(
-                                                  color: Colors.black,
-                                                  fontSize: 13,
-                                                  fontWeight: FontWeight.bold),
+                                            // Expanded (taking over from the Spacer): as a bare Row
+                                            // child this got unbounded width, so the server-driven
+                                            // code could never ellipsize.
+                                            Expanded(
+                                              child: Text(
+                                                "Referral Code: $_referralCode",
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                    color: Colors.black,
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.bold),
+                                              ),
                                             ),
-                                            const Spacer(),
                                             Image.asset("assets/copy.png",
                                                 width: 27, height: 27),
                                             const SizedBox(width: 8),

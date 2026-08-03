@@ -1,18 +1,27 @@
+import 'dart:math' as math;
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:hexcolor/hexcolor.dart';
 import 'package:intl/intl.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
-import 'package:movezy_driver_app/CommonWidgets/app_bar.dart';
 import 'package:movezy_driver_app/Screens/MyProfileScreen/my_profile_screen.dart';
 import 'package:movezy_driver_app/Screens/TakeBookingsScreen/take_bookings_screen.dart';
+import 'package:movezy_driver_app/Screens/TrainingScreen/training_screen.dart';
 import 'package:movezy_driver_app/Screens/BookingsDetailsScreen/bookings_details_screen.dart';
 import 'package:movezy_driver_app/Screens/VerifyRideScreen/verify_ride_screen.dart';
 import 'package:movezy_driver_app/Screens/CollectedCaseScreen/collected_case_screen.dart';
+import 'package:movezy_driver_app/Screens/TechnicianDashboard/driver_reviews_service.dart';
+import 'package:movezy_driver_app/Screens/TechnicianDashboard/driver_reviews_screen.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/Model/driver_dashboard_response.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/dashboard_api_service.dart';
+import 'package:movezy_driver_app/Screens/TripHistoryPage/trip_history_page.dart';
+import 'package:movezy_driver_app/Screens/TripSummeryPage/trip_summery_page.dart';
+import 'package:movezy_driver_app/Screens/MyWallet/my_wallet_screen.dart';
+import 'package:movezy_driver_app/Screens/NotificationsScreen/notifications_screen.dart';
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
 import 'package:movezy_driver_app/Utils/CustomToast/custome_toast.dart';
 import 'package:movezy_driver_app/Utils/LocationService/location_tracking_service.dart';
@@ -38,15 +47,43 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
   String _error = '';
   IO.Socket? _socket;
 
+  // What customers said about this driver. The design has a Reviews section
+  // here, but nothing ever read the ratings back out of the bookings they were
+  // written to, so the driver could never see a single one.
+  DriverReviewsResult? _reviews;
+
+  // Bookings are a tabbed, swipeable carousel in the design: On Going /
+  // Pending / Completed, with page dots beneath.
+  int _selectedTab = 0;
+  int _carouselPage = 0;
+  final PageController _pageController =
+      PageController(viewportFraction: 0.92);
+
   @override
   void initState() {
     super.initState();
     _loadDashboard();
+    _loadReviews();
     _connectSocket();
+    // Pull the admin-configured support number once per session so any call
+    // control in the app has a real value to guard on. It stays empty — and
+    // every call control stays hidden — if none is configured.
+    ApiUrls.loadSupportContact();
+  }
+
+  Future<void> _loadReviews() async {
+    try {
+      final r = await DriverReviewsService.fetch(limit: 4);
+      if (mounted) setState(() => _reviews = r);
+    } catch (e) {
+      // Reviews are secondary — never break the dashboard over them.
+      debugPrint('reviews load failed: $e');
+    }
   }
 
   @override
   void dispose() {
+    _pageController.dispose();
     _socket?.disconnect();
     _socket?.dispose();
     super.dispose();
@@ -59,13 +96,34 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
       IO.OptionBuilder()
           .setTransports(['websocket', 'polling'])
           .setAuth({'token': Prefs.accessToken})
+          // Own connection, so another service's dispose() cannot tear down the
+          // booking:new / booking:status listeners below. See ChatService.connect().
+          .enableForceNew()
           .enableAutoConnect()
           .enableReconnection()
           .build(),
     );
 
-    // Refresh dashboard when a new booking is dispatched to this driver
+    // A new booking is dispatched to this driver. The backend event is
+    // `booking:request` (dispatch service); the old `booking:new` listener was
+    // never emitted, so drivers never saw new jobs in real time and requests
+    // timed out while they sat on the dashboard. Refreshing pulls the job into
+    // the pending list immediately.
+    _socket!.on('booking:request', (_) {
+      _loadDashboard(showLoader: false);
+    });
+    // Kept for backward/admin compatibility; harmless if never fired.
     _socket!.on('booking:new', (_) {
+      _loadDashboard(showLoader: false);
+    });
+
+    // A pending request was taken by another driver — clear the stale card.
+    _socket!.on('booking:closed', (_) {
+      _loadDashboard(showLoader: false);
+    });
+
+    // The customer cancelled — refresh so the job disappears from the list.
+    _socket!.on('booking:cancelled', (_) {
       _loadDashboard(showLoader: false);
     });
 
@@ -89,6 +147,13 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
         _dashboard = response!.data;
         _isLoading = false;
         _error = '';
+        // A socket-driven refresh can shrink the active tab's list under a live
+        // PageController, leaving the dots pointing at a page that no longer
+        // exists. Clamp before the next build reads _carouselPage.
+        if (_carouselPage >= _activeList(response.data!.bookings).length) {
+          _carouselPage = 0;
+          if (_pageController.hasClients) _pageController.jumpToPage(0);
+        }
       });
 
       // Start location tracking if driver is already online
@@ -110,6 +175,13 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     if (driver == null || _isUpdatingStatus) return;
     if (!driver.isOnline && driver.status != 'approved') {
       showCustomToast(context, _approvalMessage(driver));
+      return;
+    }
+    // Training gate: intercept going online when required training is unfinished
+    // and offer to start it, rather than firing the toggle and bouncing off the
+    // server's 403. Going offline is never gated.
+    if (!driver.isOnline && (_dashboard?.training.shouldGate ?? false)) {
+      _showTrainingGate();
       return;
     }
     setState(() => _isUpdatingStatus = true);
@@ -139,17 +211,188 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     }
   }
 
+  /// Prompt shown when a driver tries to go online with training unfinished.
+  /// "Start Training Now" opens the training library; "Later" dismisses.
+  Future<void> _showTrainingGate() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                Icon(Icons.school_outlined, color: AppColors.appColor, size: 26),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'complete_training_to_earn'.tr,
+                    style: const TextStyle(
+                        fontSize: 17, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'training_gate_body'.tr,
+              style: const TextStyle(fontSize: 14, height: 1.4, color: Colors.black54),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () async {
+                  Navigator.pop(sheetCtx);
+                  await pushTo(context, const TrainingScreen());
+                  // Re-check the gate after they return from training.
+                  await _loadDashboard(showLoader: false);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.appColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                child: Text('start_training_now'.tr,
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w700)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () => Navigator.pop(sheetCtx),
+                child: Text('later'.tr,
+                    style: const TextStyle(
+                        fontSize: 14, color: Colors.black54)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Home-screen banner mirroring the Figma "Complete Your Training to Start
+  /// Earning" card: progress + a Start Training button.
+  Widget _trainingGateCard(DashboardTraining training) {
+    final total = training.totalRequired;
+    final done = training.completedRequired;
+    final progress = total > 0 ? (done / total).clamp(0.0, 1.0) : 0.0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF7ED),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFFFD6A5)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.school_outlined, color: AppColors.appColor, size: 24),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'complete_training_to_earn'.tr,
+                    style: const TextStyle(
+                        fontSize: 15.5, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'training_gate_body'.tr,
+              style: const TextStyle(fontSize: 13, height: 1.35, color: Colors.black54),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 10,
+                      backgroundColor: Colors.white,
+                      valueColor: AlwaysStoppedAnimation(AppColors.appColor),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text('$done/$total',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.appColor)),
+              ],
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () async {
+                  await pushTo(context, const TrainingScreen());
+                  await _loadDashboard(showLoader: false);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.appColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                child: Text('start_training_now'.tr,
+                    style: const TextStyle(
+                        fontSize: 14.5, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading && _dashboard == null) {
       return Scaffold(
         backgroundColor: Colors.white,
+        bottomNavigationBar: _bottomNav(),
         body: Center(child: CircularProgressIndicator(color: AppColors.appColor)),
       );
     }
     if (_dashboard == null) {
       return Scaffold(
         backgroundColor: Colors.white,
+        bottomNavigationBar: _bottomNav(),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -175,90 +418,28 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
 
     final driver = _dashboard!.driver;
     final stats = _dashboard!.stats;
-    final pendingBookings = _dashboard!.bookings.pending;
-    final currentBooking = _dashboard!.bookings.current;
+    final wallet = _dashboard!.wallet;
+    final bookings = _dashboard!.bookings;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F8FC),
+      bottomNavigationBar: _bottomNav(),
       body: RefreshIndicator(
         color: AppColors.appColor,
-        onRefresh: () => _loadDashboard(showLoader: false),
+        onRefresh: () async {
+          // Reviews are a prominent section now, but _loadReviews used to run
+          // only from initState — pull-to-refresh never updated them.
+          await Future.wait([
+            _loadDashboard(showLoader: false),
+            _loadReviews(),
+          ]);
+        },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           child: Column(
             children: [
-              // --- Top Header with Profile & Rating ---
-              Stack(
-                children: [
-                  commonAppBar(
-                    height: 140,
-                    context: context,
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 16, right: 16, top: 50),
-                      child: Row(
-                        children: [
-                          InkWell(
-                            onTap: () => pushTo(context, MyProfileScreen()),
-                            child: _avatar(driver.profilePhoto),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  driver.fullName.isEmpty ? 'Driver' : driver.fullName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  driver.city.isNotEmpty ? driver.city : 'Welcome back',
-                                  style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          // Rating badge (small corner)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.star_rounded, color: Colors.amber, size: 18),
-                                const SizedBox(width: 3),
-                                Text(
-                                  driver.rating > 0 ? driver.rating.toStringAsFixed(1) : '--',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              _header(driver, wallet),
 
-              // --- Approval Banner (if not approved) ---
               if (driver.status != 'approved') ...[
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -266,238 +447,23 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
                 ),
               ],
 
-              const SizedBox(height: 16),
-
-              // --- BIG ONLINE / OFFLINE TOGGLE ---
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: GestureDetector(
-                  onTap: _toggleStatus,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    width: double.infinity,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: driver.isOnline ? const Color(0xFF1F8B4C) : const Color(0xFF93000C),
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: (driver.isOnline ? const Color(0xFF1F8B4C) : const Color(0xFF93000C)).withValues(alpha: 0.3),
-                          blurRadius: 16,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        if (_isUpdatingStatus)
-                          const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
-                          )
-                        else ...[
-                          Icon(
-                            driver.isOnline ? Icons.power_settings_new : Icons.power_off_outlined,
-                            color: Colors.white,
-                            size: 32,
-                          ),
-                          const SizedBox(width: 14),
-                          Text(
-                            driver.isOnline ? 'online'.tr : 'offline'.tr,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 2,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+              if (_dashboard!.training.shouldGate) ...[
+                const SizedBox(height: 12),
+                _trainingGateCard(_dashboard!.training),
+              ],
 
               const SizedBox(height: 20),
-
-              // --- TODAY'S EARNINGS ---
+              _statGrid(stats),
+              const SizedBox(height: 24),
+              _monthlyRevenueChart(stats),
+              const SizedBox(height: 24),
+              _bookingsSection(stats, bookings),
+              const SizedBox(height: 28),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [AppColors.appColor, AppColors.appColor.withValues(alpha: 0.85)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.appColor.withValues(alpha: 0.25),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        'todays_earnings'.tr,
-                        style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _money.format(stats.todaysEarnings),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 36,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          _earningMiniStat(Icons.local_shipping_outlined, '${stats.todaysServices}', 'trips'.tr),
-                          Container(width: 1, height: 30, color: Colors.white30),
-                          _earningMiniStat(Icons.schedule, '${stats.upcomingServices}', 'upcoming'.tr),
-                          Container(width: 1, height: 30, color: Colors.white30),
-                          _earningMiniStat(Icons.account_balance_wallet_outlined, _money.format(_dashboard!.wallet.balance), 'wallet'.tr),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _reviewsSection(),
               ),
-
-              const SizedBox(height: 20),
-
-              // --- NEW BOOKING ALERT AREA ---
-              if (currentBooking != null) ...[
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFF1F8B4C),
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'current_booking'.tr,
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      _bookingCard(currentBooking, isOngoing: true),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              // --- PENDING BOOKINGS ---
-              if (pendingBookings.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.notifications_active, color: AppColors.appColor, size: 20),
-                          const SizedBox(width: 8),
-                          Text(
-                            '${'new_bookings'.tr} (${pendingBookings.length})',
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      ...pendingBookings.map((booking) {
-                        final isDisabled = currentBooking != null;
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: isDisabled
-                              ? Opacity(opacity: 0.5, child: IgnorePointer(child: _bookingCard(booking)))
-                              : _bookingCard(booking),
-                        );
-                      }),
-                      if (currentBooking != null)
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: HexColor('#FFF3CD'),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(children: [
-                            Icon(Icons.info_outline, color: HexColor('#856404'), size: 18),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'complete_ongoing'.tr,
-                                style: const TextStyle(fontSize: 12, color: Color(0xFF856404)),
-                              ),
-                            ),
-                          ]),
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
-              // --- Empty state when no bookings ---
-              if (currentBooking == null && pendingBookings.isEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFFE1E6EF)),
-                    ),
-                    child: Column(
-                      children: [
-                        Icon(
-                          driver.isOnline ? Icons.hourglass_empty : Icons.power_off_outlined,
-                          size: 48,
-                          color: Colors.grey.shade400,
-                        ),
-                        const SizedBox(height: 14),
-                        Text(
-                          driver.isOnline
-                              ? 'no_bookings_yet'.tr
-                              : 'go_online'.tr,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey.shade600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-
-              const SizedBox(height: 30),
+              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -505,20 +471,781 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     );
   }
 
-  Widget _earningMiniStat(IconData icon, String value, String label) {
+  // --------------------------- Header ---------------------------
+  /// Avatar, wallet balance and the online/offline toggle in one orange bar,
+  /// per the design. Built locally rather than through commonAppBar: that
+  /// helper is shared by 24 screens and its Stack child does not expand.
+  Widget _header(DashboardDriver driver, DashboardWallet wallet) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.fromLTRB(
+          16, MediaQuery.of(context).padding.top + 12, 16, 18),
+      decoration: BoxDecoration(
+        color: AppColors.appColor,
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(24),
+          bottomRight: Radius.circular(24),
+        ),
+      ),
+      child: Row(
+        children: [
+          InkWell(
+            onTap: () => pushTo(context, const MyProfileScreen()),
+            borderRadius: BorderRadius.circular(100),
+            child: _avatar(driver.profilePhoto),
+          ),
+          const Spacer(),
+          _walletPill(wallet.balance),
+          const SizedBox(width: 10),
+          _statusButton(driver),
+        ],
+      ),
+    );
+  }
+
+  Widget _walletPill(double balance) => InkWell(
+        onTap: () async {
+          await pushTo(context, const MyWalletScreen());
+          _loadDashboard(showLoader: false);
+        },
+        borderRadius: BorderRadius.circular(50),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(50),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.8)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.asset('assets/moneys.png', height: 16, color: Colors.white),
+              const SizedBox(width: 6),
+              Text(
+                _money.format(balance),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  /// The design's dark button at the right of the header. It replaces the old
+  /// full-width 80px toggle; _toggleStatus itself is untouched, so the approval
+  /// gate, training gate, haptics and location tracking all still apply.
+  Widget _statusButton(DashboardDriver driver) {
+    final online = driver.isOnline;
+    return InkWell(
+      onTap: _isUpdatingStatus ? null : _toggleStatus,
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+        decoration: BoxDecoration(
+          color: online ? const Color(0xFF1F8B4C) : const Color(0xFF93000C),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: _isUpdatingStatus
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 2),
+              )
+            : Text(
+                online ? 'Online' : 'Offline',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600),
+              ),
+      ),
+    );
+  }
+
+  // -------------------------- Stat grid --------------------------
+  Widget _statGrid(DashboardStats stats) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: GridView.count(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        crossAxisCount: 2,
+        mainAxisSpacing: 14,
+        crossAxisSpacing: 14,
+        childAspectRatio: 1.62,
+        children: [
+          _statTile(_money.format(stats.totalEarnings), 'Total Earning',
+              Icons.account_balance_wallet_outlined),
+          _statTile('${stats.totalServices}', 'Total Service',
+              Icons.receipt_long_outlined),
+          _statTile('${stats.upcomingServices}', 'Upcoming Services',
+              Icons.event_available_outlined),
+          // Zero-padded to two digits, as the design shows ("05").
+          _statTile('${stats.todaysServices}'.padLeft(2, '0'),
+              'Todays Service', Icons.today_outlined),
+        ],
+      ),
+    );
+  }
+
+  Widget _statTile(String value, String label, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE9EDF3)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // FittedBox: a six-figure lifetime earning would otherwise
+                // overflow the tile at large text scales.
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.appColor),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: AppColors.appColor.withValues(alpha: 0.10),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 14, color: AppColors.appColor),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ------------------------ Bookings section ------------------------
+
+  /// Pending offers minus the ones this driver skipped in this session. The
+  /// backend's reject only prunes a Redis dispatch set, so an unfiltered
+  /// refresh re-offered a job seconds after it was declined.
+  List<DashboardBooking> _pendingOffers(DashboardBookings b) =>
+      SkippedBookings.filter(b.pending);
+
+  List<DashboardBooking> _activeList(DashboardBookings b) {
+    switch (_selectedTab) {
+      case 0:
+        return b.current == null ? const [] : [b.current!];
+      case 1:
+        return _pendingOffers(b);
+      default:
+        return b.completed;
+    }
+  }
+
+  Widget _bookingsSection(DashboardStats stats, DashboardBookings bookings) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Flexible(
+                child: Text('Recommended Bookings',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              ),
+              InkWell(
+                onTap: () async {
+                  await pushTo(context, const TripHistoryPage());
+                  _loadDashboard(showLoader: false);
+                },
+                child: Row(
+                  children: [
+                    Text('View All',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade700)),
+                    Icon(Icons.chevron_right,
+                        size: 18, color: Colors.grey.shade700),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              _tabButton('On Going',
+                  _tabCount(stats.onGoingCount, bookings.current == null ? 0 : 1), 0),
+              const SizedBox(width: 8),
+              // Skipped offers are dropped from the badge too, or the tab
+              // advertised a job the list no longer shows.
+              _tabButton(
+                  'Pending',
+                  _tabCount(
+                      stats.pendingCount -
+                          (bookings.pending.length -
+                              _pendingOffers(bookings).length),
+                      _pendingOffers(bookings).length),
+                  1),
+              const SizedBox(width: 8),
+              _tabButton('Completed',
+                  _tabCount(stats.completedCount, bookings.completed.length), 2),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        _bookingCarousel(bookings),
+      ],
+    );
+  }
+
+  /// Badge text for a tab. The stats are full-DB counts while each list is
+  /// capped server-side (5 per tab), so a veteran driver saw "Completed(1240)"
+  /// over five cards — show "5+" when the list is the cap, not the total.
+  String _tabCount(int count, int shown) {
+    if (count <= 0) return '';
+    if (shown > 0 && count > shown) return '$shown+';
+    return '$count';
+  }
+
+  Widget _tabButton(String label, String count, int tabIndex) {
+    final selected = _selectedTab == tabIndex;
+    // Width proportional to the text each tab carries.
+    //
+    // All three were equal thirds, so the longest label — "Completed" plus its
+    // count — was the only one that didn't fit, and the FittedBox shrank just
+    // that tab's text. The row still fills edge to edge; the space is simply
+    // divided by what each pill actually has to show.
+    final flex = (label.length + count.length).clamp(1, 40);
+    return Expanded(
+      flex: flex,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () {
+          if (selected) return;
+          setState(() {
+            _selectedTab = tabIndex;
+            _carouselPage = 0;
+          });
+          // jumpToPage, not animateToPage: the new tab's list may be shorter
+          // than the current index, which an animation would run off the end of.
+          if (_pageController.hasClients) _pageController.jumpToPage(0);
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? AppColors.appColor : const Color(0xFFEFF1F5),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              count.isNotEmpty ? '$label ($count)' : label,
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: selected ? Colors.white : const Color(0xFF3A4250),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _bookingCarousel(DashboardBookings bookings) {
+    final list = _activeList(bookings);
+    if (list.isEmpty) return _tabEmptyState();
+
+    // Pending jobs stay visible but untappable while a trip is in progress —
+    // the same rule the old flat pending list enforced.
+    final blocked = _selectedTab == 1 && bookings.current != null;
+
     return Column(
       children: [
-        Icon(icon, color: Colors.white70, size: 18),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
+        SizedBox(
+          // Tracks the card's interior padding: a fixed height would clip the
+          // last row now that the card carries 16px instead of 14px.
+          height: 258,
+          child: PageView.builder(
+            controller: _pageController,
+            itemCount: list.length,
+            padEnds: false,
+            onPageChanged: (i) => setState(() => _carouselPage = i),
+            itemBuilder: (_, i) => Padding(
+              padding: EdgeInsets.only(left: i == 0 ? 16 : 0, right: 12),
+              child: blocked
+                  ? Opacity(
+                      opacity: 0.5,
+                      child: IgnorePointer(child: _bookingCard(list[i])))
+                  : _bookingCard(list[i], isOngoing: _selectedTab == 0),
+            ),
+          ),
         ),
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white60, fontSize: 11),
-        ),
+        if (blocked) ...[
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: HexColor('#FFF3CD'),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(children: [
+                Icon(Icons.info_outline, color: HexColor('#856404'), size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('complete_ongoing'.tr,
+                      style: const TextStyle(
+                          fontSize: 12, color: Color(0xFF856404))),
+                ),
+              ]),
+            ),
+          ),
+        ],
+        if (list.length > 1) ...[
+          const SizedBox(height: 12),
+          _pageDots(list.length),
+        ],
       ],
+    );
+  }
+
+  Widget _pageDots(int count) => Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: List.generate(count, (i) {
+          final active = i == _carouselPage;
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            width: active ? 18 : 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: active ? AppColors.appColor : const Color(0xFFD5DAE3),
+              borderRadius: BorderRadius.circular(3),
+            ),
+          );
+        }),
+      );
+
+  /// Per-tab empty state, at the carousel's height so switching tabs does not
+  /// jolt the scroll position.
+  Widget _tabEmptyState() {
+    final driver = _dashboard!.driver;
+    late final IconData icon;
+    late final String text;
+    switch (_selectedTab) {
+      case 0:
+        icon =
+            driver.isOnline ? Icons.hourglass_empty : Icons.power_off_outlined;
+        text = driver.isOnline ? 'no_bookings_yet'.tr : 'go_online'.tr;
+        break;
+      case 1:
+        icon = Icons.inbox_outlined;
+        text = 'No new bookings right now';
+        break;
+      default:
+        icon = Icons.check_circle_outline;
+        text = 'No completed trips yet';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        height: 250,
+        width: double.infinity,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE1E6EF)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 44, color: Colors.grey.shade400),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                text,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade600),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // -------------------------- Bottom nav --------------------------
+  Widget _bottomNav() => Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 12,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 58,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _navIcon(Icons.home_rounded, active: true, onTap: null),
+                _navIcon(Icons.receipt_long_outlined, onTap: () async {
+                  await pushTo(context, const TripHistoryPage());
+                  _loadDashboard(showLoader: false);
+                }),
+                _navIcon(Icons.account_balance_wallet_outlined,
+                    onTap: () async {
+                  await pushTo(context, const MyWalletScreen());
+                  _loadDashboard(showLoader: false);
+                }),
+                _navIcon(Icons.notifications_none_rounded, onTap: () async {
+                  await pushTo(context, const NotificationsScreen());
+                  _loadDashboard(showLoader: false);
+                }),
+              ],
+            ),
+          ),
+        ),
+      );
+
+  Widget _navIcon(IconData icon,
+          {bool active = false, required VoidCallback? onTap}) =>
+      InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+          child: Icon(
+            icon,
+            size: 26,
+            color: active ? AppColors.appColor : Colors.grey.shade400,
+          ),
+        ),
+      );
+
+  /// Monthly revenue bar chart (design: driver dashboard).
+  ///
+  /// The backend has always returned `monthlyRevenue` and the model has always
+  /// parsed it — and fl_chart was in pubspec with zero usages anywhere. The
+  /// data was on the wire and simply never drawn. Hidden when there's nothing
+  /// to show rather than rendering an empty axis.
+  /// Reviews, as the design has them: header + View All, then entries with a
+  /// round photo, name, right-aligned date, a star row with the numeric score,
+  /// and the comment. Hidden entirely when there are none — an empty "Reviews"
+  /// header would just look broken.
+  Widget _reviewsSection() {
+    final r = _reviews;
+    if (r == null || r.reviews.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                const Text('Reviews',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                const SizedBox(width: 8),
+                if (r.count > 0) ...[
+                  Icon(Icons.star_rounded,
+                      size: 16, color: AppColors.appColor),
+                  const SizedBox(width: 2),
+                  // toStringAsFixed(1): the raw double prints "4.0"/"0.0".
+                  // This aggregate is the only decimal rating that exists —
+                  // a single review's rating is a whole number of stars.
+                  Text('${r.average.toStringAsFixed(1)} (${r.count})',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade600)),
+                ],
+              ],
+            ),
+            InkWell(
+              onTap: () => pushTo(context, const DriverReviewsScreen()),
+              child: Text('View All',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.appColor)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        ...r.reviews.map(_reviewTile),
+      ],
+    );
+  }
+
+  Widget _reviewTile(DriverReview review) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _avatar(review.customerPhoto),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        review.customerName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    if (review.ratedAt != null)
+                      Text(
+                        DateFormat('dd MMM').format(review.ratedAt!),
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade500),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    for (var i = 1; i <= 5; i++)
+                      Icon(
+                        i <= review.rating ? Icons.star : Icons.star_border,
+                        size: 13,
+                        color: AppColors.appColor,
+                      ),
+                    const SizedBox(width: 6),
+                    Text('${review.rating}',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade700)),
+                  ],
+                ),
+                if (review.comment.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    review.comment,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 12, color: Colors.grey.shade700, height: 1.4),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// A 1/2/5 x 10^n step, so four gridlines land on round numbers whatever the
+  /// driver actually earns.
+  double _axisStep(double top) {
+    if (top <= 0) return 1;
+    final rough = top / 4;
+    final mag = math.pow(10, (math.log(rough) / math.ln10).floor()).toDouble();
+    final norm = rough / mag;
+    final nice = norm <= 1 ? 1.0 : (norm <= 2 ? 2.0 : (norm <= 5 ? 5.0 : 10.0));
+    return nice * mag;
+  }
+
+  Widget _monthlyRevenueChart(DashboardStats stats) {
+    final points = stats.monthlyRevenue;
+    if (points.isEmpty || points.every((p) => p.amount <= 0)) {
+      return const SizedBox.shrink();
+    }
+
+    final maxY = points.map((p) => p.amount).reduce((a, b) => a > b ? a : b);
+    // Head-room so bars don't touch the ceiling, then rounded up to a tidy
+    // step so the gridlines read as round numbers (the design shows
+    // 0/5000/10000/15000). The step is derived from the driver's real revenue,
+    // never hardcoded — a driver earning 800/month must not get a 15k axis.
+    final headroom = maxY <= 0 ? 1.0 : maxY * 1.2;
+    final step = _axisStep(headroom);
+    final top = (headroom / step).ceil() * step;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: HexColor("#E6EEF2")),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Centered, with the unit appended. The word "Rupee" is not
+            // hardcoded — 'monthly_revenue' is translated into 11 languages.
+            Center(
+              child: Text(
+                '${'monthly_revenue'.tr} (₹)',
+                style:
+                    const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 150,
+              child: BarChart(
+                BarChartData(
+                  maxY: top,
+                  alignment: BarChartAlignment.spaceAround,
+                  borderData: FlBorderData(show: false),
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    horizontalInterval: step,
+                    getDrawingHorizontalLine: (_) =>
+                        FlLine(color: HexColor("#EEF2F5"), strokeWidth: 1),
+                  ),
+                  titlesData: FlTitlesData(
+                    topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false)),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 40,
+                        interval: step,
+                        getTitlesWidget: (value, meta) {
+                          if (value == 0) return const SizedBox.shrink();
+                          final k = value >= 1000
+                              ? '${(value / 1000).toStringAsFixed(0)}k'
+                              : value.toStringAsFixed(0);
+                          return Text(k,
+                              style: TextStyle(
+                                  fontSize: 10, color: HexColor("#8B95A1")));
+                        },
+                      ),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 24,
+                        getTitlesWidget: (value, meta) {
+                          final i = value.toInt();
+                          if (i < 0 || i >= points.length) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              points[i].month,
+                              style: TextStyle(
+                                  fontSize: 10, color: HexColor("#8B95A1")),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  barTouchData: BarTouchData(
+                    touchTooltipData: BarTouchTooltipData(
+                      getTooltipItem: (group, _, rod, _) => BarTooltipItem(
+                        '${points[group.x].month}\n${_money.format(rod.toY)}',
+                        const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                  barGroups: [
+                    for (var i = 0; i < points.length; i++)
+                      BarChartGroupData(
+                        x: i,
+                        barRods: [
+                          BarChartRodData(
+                            toY: points[i].amount,
+                            width: 14,
+                            color: AppColors.appColor,
+                            borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(4)),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -585,7 +1312,13 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
                   VerifyRideScreen(
                     bookingId: booking.id,
                     bookingNumber: booking.bookingNumber,
-                    earnings: booking.estimatedFare.toStringAsFixed(0),
+                    earnings: (booking.estimatedEarnings > 0
+                            ? booking.estimatedEarnings
+                            : booking.estimatedFare)
+                        .toStringAsFixed(0),
+                    earningsIsGross: booking.estimatedEarnings <= 0,
+                    scheduledAt: booking.scheduledAt,
+                    createdAt: booking.createdAt,
                   ),
                 );
                 break;
@@ -599,6 +1332,11 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
               default: // ASSIGNED (or anything earlier) → mark-arrived screen
                 await pushTo(context, BookingDetailPage(booking: booking));
             }
+          } else if (booking.status == 'COMPLETED' ||
+              booking.status == 'CANCELLED') {
+            // A finished ride is a record, not an offer — the Completed tab
+            // used to open the Skip/Accept screen for rides already done.
+            await pushTo(context, TripSummeryPage(bookingId: booking.id));
           } else {
             await pushTo(context, TakeBookingsScreen(booking: booking));
           }
@@ -619,7 +1357,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Padding(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(16),
               child: Column(children: [
                 Row(children: [
                   Container(
@@ -642,26 +1380,63 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
                         : Padding(padding: const EdgeInsets.all(8), child: Image.asset('assets/repeate_music.png')),
                   ),
                   const SizedBox(width: 10),
-                  Expanded(child: Text(_bookingTitle(booking), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                  Expanded(child: Text(_bookingTitle(booking), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14))),
                   const SizedBox(width: 8),
                   if (isOngoing)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(color: const Color(0xFF1F8B4C), borderRadius: BorderRadius.circular(100)),
                       child: Text('active'.tr, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                    )
+                  else if (_bookingWhen(booking).isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.appColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        _bookingWhen(booking),
+                        style: TextStyle(
+                            color: AppColors.appColor,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w600),
+                      ),
                     ),
                 ]),
                 const SizedBox(height: 10),
                 Row(children: [
-                  Text('${booking.distanceKm.toStringAsFixed(1)} km', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(width: 6),
-                  Container(width: 4, height: 4, decoration: const BoxDecoration(color: Colors.grey, shape: BoxShape.circle)),
-                  const SizedBox(width: 6),
-                  Text(_duration(booking.durationMin), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                  if (booking.customerName.isNotEmpty) ...[
-                    const Spacer(),
-                    Text(booking.customerName, style: TextStyle(fontSize: 11.5, color: HexColor('#6C757D'), fontWeight: FontWeight.w600)),
-                  ],
+                  Flexible(
+                    child: Text(
+                      'Estimate Usage: ${_duration(booking.durationMin)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      'Total Dist.: ${booking.distanceKm.toStringAsFixed(1)} km',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                    ),
+                  ),
+                  if (booking.customerName.isNotEmpty)
+                    // Expanded + textAlign.end: behind a Spacer the name was a bare Row
+                    // child with unbounded width, so a long server-driven name could never
+                    // ellipsize. Expanded fills the same gap the Spacer did and keeps the
+                    // text flush to the trailing edge.
+                    Expanded(
+                      child: Text(
+                        booking.customerName,
+                        textAlign: TextAlign.end,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11.5, color: HexColor('#6C757D'), fontWeight: FontWeight.w600),
+                      ),
+                    ),
                 ]),
               ]),
             ),
@@ -671,12 +1446,24 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Container(
-                  height: 10,
-                  width: 10,
-                  margin: const EdgeInsets.only(top: 4),
-                  decoration: const BoxDecoration(color: Color(0xFF1F8B4C), shape: BoxShape.circle),
+                  height: 13,
+                  width: 13,
+                  margin: const EdgeInsets.only(top: 2, left: 1),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFF1F8B4C), width: 2),
+                  ),
+                  child: const SizedBox(
+                    height: 4,
+                    width: 4,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                          color: Color(0xFF1F8B4C), shape: BoxShape.circle),
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 11),
+                const SizedBox(width: 9),
                 Expanded(child: Text(booking.pickupAddress.isEmpty ? 'Pickup' : booking.pickupAddress, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
               ]),
             ),
@@ -684,37 +1471,73 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Container(
-                  height: 10,
-                  width: 10,
-                  margin: const EdgeInsets.only(top: 4),
-                  decoration: const BoxDecoration(color: Color(0xFFE02D3C), shape: BoxShape.circle),
+                const Padding(
+                  padding: EdgeInsets.only(top: 1),
+                  child: Icon(Icons.location_on,
+                      size: 15, color: Color(0xFFE02D3C)),
                 ),
-                const SizedBox(width: 11),
+                const SizedBox(width: 8),
                 Expanded(child: Text(booking.dropAddress.isEmpty ? 'Drop' : booking.dropAddress, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
               ]),
             ),
             Container(height: 1, color: const Color(0xFFE1E6EF)),
-            // Fare
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: HexColor('#F0F9FF'),
-                borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(14), bottomRight: Radius.circular(14)),
-              ),
-              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Image.asset('assets/moneys.png', height: 22, color: Colors.black),
-                const SizedBox(width: 6),
-                Text(
-                  _money.format(booking.estimatedFare),
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-                ),
-              ]),
-            ),
+            // What the driver gets — not the customer's fare.
+            //
+            // This showed booking.estimatedFare, the customer's gross, while
+            // every screen it opens (TakeBookings, VerifyRide) shows
+            // estimatedEarnings — subtotal minus commission, pre-GST — under
+            // "Your estimated earnings". The card therefore advertised roughly
+            // a quarter more than the next screen promised. Same basis and the
+            // same fallback label as those screens now.
+            _bookingEarnings(booking),
           ]),
         ),
       );
+
+  /// The card's money row: the driver's own settlement estimate.
+  ///
+  /// `estimatedEarnings` is what the server computes for this driver
+  /// (subtotal − commission, pre-GST, and the frozen `driverEarnings` once the
+  /// trip is complete). Older bookings can carry 0 for it; in that case the
+  /// gross fare is shown but labelled as trip value, never as earnings —
+  /// exactly what TakeBookingsScreen and VerifyRideScreen do.
+  Widget _bookingEarnings(DashboardBooking booking) {
+    final bool earningsUnknown = booking.estimatedEarnings <= 0;
+    final double amount =
+        earningsUnknown ? booking.estimatedFare : booking.estimatedEarnings;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: HexColor('#F0F9FF'),
+        borderRadius: const BorderRadius.only(
+            bottomLeft: Radius.circular(14), bottomRight: Radius.circular(14)),
+      ),
+      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Image.asset('assets/moneys.png', height: 22, color: Colors.black),
+        const SizedBox(width: 6),
+        Text(
+          _money.format(amount),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            earningsUnknown
+                ? 'Trip value (earnings pending)'
+                : 'Your estimated earnings',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade600),
+          ),
+        ),
+      ]),
+    );
+  }
 
   String _approvalMessage(DashboardDriver driver) {
     if (driver.status == 'suspended') {
@@ -735,6 +1558,20 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
       : (b.bookingNumber.isNotEmpty ? b.bookingNumber : _serviceType(b.serviceType));
 
   String _serviceType(String value) => value == 'WITHIN_CITY' ? 'Within City' : (value == 'OUTSTATION' ? 'Outstation' : value.replaceAll('_', ' '));
+
+  /// The design's orange badge, e.g. "28 Feb. 10:10 AM". Prefers the scheduled
+  /// time and falls back to when the booking was raised. Parsed as UTC then
+  /// converted, so an IST driver is not shown a time 5.5 hours out; the backend
+  /// also sends the literal string "null", which must not become a date.
+  String _bookingWhen(DashboardBooking b) {
+    for (final raw in [b.scheduledAt, b.createdAt]) {
+      if (raw.isEmpty || raw == 'null') continue;
+      final dt = DateTime.tryParse(raw);
+      if (dt == null) continue;
+      return DateFormat('dd MMM. hh:mm a').format(dt.toLocal());
+    }
+    return '';
+  }
 
   String _duration(int min) => min >= 60 ? '${min ~/ 60} hr${min % 60 == 0 ? '' : ' ${min % 60} min'}' : '$min min';
 }

@@ -22,7 +22,7 @@ import 'package:movezy_driver_app/Screens/TrainingScreen/training_screen.dart';
 import 'package:movezy_driver_app/Screens/TripHistoryPage/trip_history_page.dart';
 import 'package:movezy_driver_app/Screens/driver_instruction_screen/driver_instructions_screen.dart';
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
-import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
+import 'package:movezy_driver_app/Utils/Auth/driver_logout.dart';
 
 class MyProfileScreen extends StatefulWidget {
   const MyProfileScreen({super.key});
@@ -33,10 +33,13 @@ class MyProfileScreen extends StatefulWidget {
 
 class _MyProfileScreenState extends State<MyProfileScreen> {
   final MyProfileApiService _apiService = MyProfileApiService();
+  // Two decimals, matching the design and driver_profile_screen \u2014 which shows
+  // the SAME lifetime total. At decimalDigits: 0 this strip rounded the paise
+  // away, so the two screens disagreed about the driver's own earnings.
   final NumberFormat _money = NumberFormat.currency(
     locale: 'en_IN',
     symbol: '\u20B9',
-    decimalDigits: 0,
+    decimalDigits: 2,
   );
 
   DriverProfileBundle? _profile;
@@ -343,7 +346,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
           }, AppColors.appColor),
           _divider(),
           _buildListTile('my_vehicles'.tr, 'assets/task_square.png', () {
-            pushTo(context, const MyVehiclesScreen());
+            pushTo(context, const MyVehiclesScreen(isOnboarding: false));
           }, AppColors.appColor),
           _divider(),
           _buildListTile('refer_and_earn'.tr, 'assets/share.png', () {
@@ -380,10 +383,10 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
           _divider(),
           ListTile(
             onTap: () async {
-              Prefs.setBool('check_log_in', false);
-              Prefs.setString('mobile_number', '');
-              await Prefs.load();
-              Prefs.loadData();
+              // Shared routine: stops GPS/socket, tells the server we're offline
+              // (so dispatch stops), and clears the token — none of which the
+              // old inline logout did.
+              await performDriverLogout();
               if (!mounted) return;
               replaceRoute(context, LoginScreen());
             },

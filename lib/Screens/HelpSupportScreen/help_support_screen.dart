@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/CommonWidgets/app_bar.dart';
+import 'package:movezy_driver_app/Screens/SupportChat/support_chat_service.dart';
 import 'package:movezy_driver_app/Screens/SupportChat/support_tickets_screen.dart';
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class HelpSupportScreen extends StatefulWidget {
   const HelpSupportScreen({super.key});
@@ -19,8 +18,11 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<ChatMessage> _messages = [];
+  final SupportChatService _supportService = SupportChatService();
   bool _isTyping = false;
   bool _showSupportOptions = false;
+  // Guards the ticket-creating actions so a double tap can't open two tickets.
+  bool _raisingTicket = false;
 
   // Predefined bot responses based on keywords
   final Map<String, String> _botResponses = {
@@ -90,6 +92,19 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     setState(() {
       _messages.add(ChatMessage(
         text: messageKey.tr,
+        isUser: false,
+        timestamp: DateTime.now(),
+      ));
+    });
+    _scrollToBottom();
+  }
+
+  /// Post a bot bubble whose text is already final (not a translation key).
+  void _addRawBotMessage(String text) {
+    if (!mounted) return;
+    setState(() {
+      _messages.add(ChatMessage(
+        text: text,
         isUser: false,
         timestamp: DateTime.now(),
       ));
@@ -234,19 +249,61 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     });
   }
 
-  Future<void> _handleEmergencyEscalation() async {
-    _addBotMessage('bot_emergency_routing');
-    HapticFeedback.heavyImpact();
+  /// The answers the bot collected, formatted for a ticket body. Empty string
+  /// when nothing was collected — never filler.
+  String get _detailsSummary => _collectedDetails.isEmpty
+      ? ''
+      : '\n\n${_detailsQuestions.where((q) => (_collectedDetails[q['key']!] ?? '').trim().isNotEmpty).map((q) => '• ${q['key']}: ${_collectedDetails[q['key']!]}').join('\n')}';
 
+  /// The issue category the bot matched, if any, as a ticket-subject suffix.
+  /// `_currentCategory` was previously written and never read.
+  String _issueContext() {
+    final category = _currentCategory;
+    if (category == null || category.isEmpty) return '';
+    // Keys look like "payment_bot_response" — the leading token is the topic.
+    return ' (${category.split('_').first})';
+  }
+
+  Future<void> _handleEmergencyEscalation() async {
+    HapticFeedback.heavyImpact();
     setState(() => _showSupportOptions = true);
 
-    // Try to launch the dialer immediately for priority response.
-    Future.delayed(const Duration(milliseconds: 500), () async {
-      final Uri phoneUri = Uri(scheme: 'tel', path: ApiUrls.supportPhoneNumber);
-      if (await canLaunchUrl(phoneUri)) {
-        await launchUrl(phoneUri);
-      }
-    });
+    // This used to auto-dial ApiUrls.supportPhoneNumber, which was the
+    // placeholder +91 1234567890 — a driver escalating an accident was sent to
+    // a number that belongs to nobody. There is no real support line available
+    // to the app, so the escalation now does the one thing that genuinely
+    // reaches Movezy: it opens a support ticket on the driver's account, which
+    // lands in the admin support queue and can be replied to in-app.
+    if (_raisingTicket) return;
+    setState(() => _raisingTicket = true);
+    // Immediate acknowledgement so the tap isn't silent while the request is
+    // in flight. It states what is happening, not what will happen.
+    _addRawBotMessage('Raising an emergency support request…');
+
+    final ticketId = await _supportService.createTicket(
+      category: 'Emergency',
+      subject: 'Emergency - driver needs urgent help${_issueContext()}',
+      message:
+          'Driver raised an emergency from Help & Support.$_detailsSummary',
+    );
+
+    if (!mounted) return;
+    setState(() => _raisingTicket = false);
+
+    if (ticketId != null) {
+      _addRawBotMessage(
+        'Emergency request raised — ticket $ticketId. It is in the support '
+        'queue and replies arrive in Live Chat.\n\n'
+        'If anyone is injured or in danger, contact your local emergency '
+        'services now — do not wait for this ticket.',
+      );
+    } else {
+      _addRawBotMessage(
+        '${'ticket_submit_failed'.tr}\n\n'
+        'If anyone is injured or in danger, contact your local emergency '
+        'services now.',
+      );
+    }
   }
 
   void _handleQuickAction(String key) {
@@ -325,24 +382,13 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            
-            // Call Option
-            _buildSupportOption(
-              icon: Icons.phone,
-              iconColor: Colors.green,
-              title: 'call_support'.tr,
-              subtitle: 'call_support_desc'.tr,
-              onTap: () async {
-                Navigator.pop(context);
-                final Uri phoneUri = Uri(scheme: 'tel', path: ApiUrls.supportPhoneNumber);
-                if (await canLaunchUrl(phoneUri)) {
-                  await launchUrl(phoneUri);
-                }
-              },
-            ),
-            
-            const SizedBox(height: 12),
-            
+
+            // The "Call Support" option that used to head this list dialled
+            // ApiUrls.supportPhoneNumber — a placeholder number. No real
+            // helpline is published to the app, so the option is gone rather
+            // than sending drivers to a dead line. The two options below both
+            // reach the real support queue.
+
             // Live Chat Option — opens the REAL support ticket chat (was a
             // fake scripted bot that never reached a human).
             _buildSupportOption(
@@ -362,12 +408,17 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
 
             const SizedBox(height: 12),
 
-            // Call Back Option — driver gets a return call from support.
+            // Call Back Option — raises a real ticket asking support to call
+            // the driver back on their registered number.
+            // The subtitle used to read "We'll call you within a few minutes",
+            // an SLA nothing in the system backs; it now states only what the
+            // action does. (Plain English: there is no translation key for this
+            // sentence and the localisation files are outside this change.)
             _buildSupportOption(
               icon: Icons.phone_callback_outlined,
               iconColor: Colors.orange,
               title: 'call_back_support'.tr,
-              subtitle: 'call_back_desc'.tr,
+              subtitle: 'Ask support to call your registered number',
               onTap: () {
                 Navigator.pop(context);
                 _requestCallBack();
@@ -452,32 +503,35 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     );
   }
 
-  void _requestCallBack() {
-    final summary = _collectedDetails.isEmpty
-        ? ''
-        : '\n\n${_detailsQuestions.map((q) => '• ${q['key']}: ${_collectedDetails[q['key']!] ?? '-'}').join('\n')}';
-    setState(() {
-      _messages.add(ChatMessage(
-        text: '${'call_back_queued'.tr}$summary',
-        isUser: false,
-        timestamp: DateTime.now(),
-      ));
-    });
-    _scrollToBottom();
-  }
+  /// Raise a real "call back" ticket.
+  ///
+  /// This used to only print "A support agent will call you back shortly" into
+  /// the chat. Nothing was sent anywhere — no ticket existed, so nobody was
+  /// ever going to call. It now posts to the same support-ticket endpoint the
+  /// FAQ form and Live Chat use, and reports the ticket id the server returned
+  /// (or the failure), so the confirmation matches what actually happened.
+  Future<void> _requestCallBack() async {
+    if (_raisingTicket) return;
+    setState(() => _raisingTicket = true);
 
-  void _startLiveChat() {
-    // Clear bot messages and show connecting message
-    setState(() {
-      _messages.clear();
-      _showSupportOptions = true;
-    });
-    
-    _addBotMessage('connecting_to_agent');
-    
-    Future.delayed(const Duration(seconds: 2), () {
-      _addBotMessage('agent_connected');
-    });
+    final ticketId = await _supportService.createTicket(
+      category: 'Call Back',
+      subject: 'Call back requested${_issueContext()}',
+      message:
+          'Driver requested a call back on their registered number.$_detailsSummary',
+    );
+
+    if (!mounted) return;
+    setState(() => _raisingTicket = false);
+
+    if (ticketId != null) {
+      _addRawBotMessage(
+        'Call back requested — ticket $ticketId. Support will call your '
+        'registered number and can also reply in Live Chat.$_detailsSummary',
+      );
+    } else {
+      _addRawBotMessage('ticket_submit_failed'.tr);
+    }
   }
 
   @override
@@ -574,45 +628,24 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
               ),
             ),
 
-          // Connect to Support Button (show after bot conversation)
+          // Connect to Support Button (show after bot conversation).
+          // The "Call" button that sat to the left of this dialled the
+          // placeholder support number; with no real line to dial it is gone
+          // and Live Support (real tickets + chat) takes the full width.
           if (_showSupportOptions)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () async {
-                        final Uri phoneUri = Uri(scheme: 'tel', path: ApiUrls.supportPhoneNumber);
-                        if (await canLaunchUrl(phoneUri)) {
-                          await launchUrl(phoneUri);
-                        }
-                      },
-                      icon: const Icon(Icons.phone, size: 18),
-                      label: Text('call'.tr, style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.green,
-                        side: const BorderSide(color: Colors.green),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _showSupportOptionsSheet,
-                      icon: const Icon(Icons.support_agent, size: 18),
-                      label: Text('live_support'.tr, style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.appColor,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                  ),
-                ],
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _showSupportOptionsSheet,
+                icon: const Icon(Icons.support_agent, size: 18),
+                label: Text('live_support'.tr, style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.appColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
               ),
             ),
 

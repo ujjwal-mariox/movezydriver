@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/Screens/BookingsDetailsScreen/bookings_details_screen.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/dashboard_api_service.dart';
@@ -8,8 +7,33 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:movezy_driver_app/Services/routing_service.dart';
 import 'package:fluttertoast/fluttertoast.dart';
+import 'package:intl/intl.dart';
 import 'package:get/get.dart';
+
+/// Offers this driver has already declined, for as long as the app is running.
+///
+/// The backend's reject only prunes a Redis dispatch set — the booking itself
+/// stays SEARCHING and is still one of *this* driver's pending rows, so the
+/// dashboard refresh that runs the moment this screen pops put the very same
+/// card straight back on screen. Held in memory only: a skip is a decision
+/// about one dispatch round, not a permanent block, so a relaunch starts clean.
+class SkippedBookings {
+  SkippedBookings._();
+
+  static final Set<String> _ids = <String>{};
+
+  static void add(String bookingId) {
+    if (bookingId.isNotEmpty) _ids.add(bookingId);
+  }
+
+  static bool contains(String bookingId) => _ids.contains(bookingId);
+
+  /// [offers] minus everything this driver has skipped.
+  static List<DashboardBooking> filter(List<DashboardBooking> offers) =>
+      offers.where((o) => !_ids.contains(o.id)).toList();
+}
 
 class TakeBookingsScreen extends StatefulWidget {
   final DashboardBooking booking;
@@ -24,12 +48,34 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
   bool _isAccepting = false;
   bool _isRejecting = false;
 
-  // Countdown timer
-  static const int _countdownSeconds = 30;
-  int _remainingSeconds = _countdownSeconds;
-  Timer? _timer;
+  // There is deliberately no countdown here.
+  //
+  // A 30-second timer used to start when this screen opened, and at zero it
+  // called reject and told the driver "Booking declined". Both halves were
+  // wrong. The number was invented client-side: this screen is opened from the
+  // dashboard's Pending list, which the server builds from every unassigned
+  // SEARCHING/PENDING booking matching the driver's vehicle type — those rows
+  // carry no expiry and the payload has no expiry timestamp to derive one from.
+  // And nothing server-side stops a driver accepting late: acceptBooking only
+  // requires the booking to still be unassigned, so the "expired" offer the app
+  // auto-declined was still perfectly acceptable.
+  //
+  // If the payload ever starts carrying a server expiry (the dispatch socket
+  // event `booking:request` does send an `expiresAt`, but the dashboard REST
+  // payload this screen is built from does not), derive the remaining time from
+  // that. Until then the screen asserts no deadline, and it never reports a
+  // decline the driver did not make.
 
   DashboardBooking get booking => widget.booking;
+
+  /// Road geometry pickup → drop; empty until fetched, straight line until then.
+  List<LatLng> _roadRoute = const [];
+
+  Future<void> _loadRoadRoute() async {
+    if (!_hasValidCoords) return;
+    final points = await RoutingService.route(pickupLatLng, dropLatLng);
+    if (mounted && points.length > 2) setState(() => _roadRoute = points);
+  }
 
   LatLng get pickupLatLng => LatLng(booking.pickup.lat, booking.pickup.lng);
   LatLng get dropLatLng => LatLng(booking.drop.lat, booking.drop.lng);
@@ -52,15 +98,9 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
   @override
   void initState() {
     super.initState();
-    _startCountdown();
+    _loadRoadRoute();
     // Strong vibration on new order
     _vibrateNewOrder();
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
   }
 
   void _vibrateNewOrder() async {
@@ -71,31 +111,7 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
     }
   }
 
-  void _startCountdown() {
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      setState(() {
-        _remainingSeconds--;
-      });
-      // Vibrate at 10 seconds warning
-      if (_remainingSeconds == 10) {
-        HapticFeedback.heavyImpact();
-      }
-      if (_remainingSeconds <= 0) {
-        timer.cancel();
-        // Auto-ignore on timeout
-        if (mounted && !_isAccepting) {
-          _rejectBooking();
-        }
-      }
-    });
-  }
-
   Future<void> _acceptBooking() async {
-    _timer?.cancel();
     setState(() => _isAccepting = true);
     HapticFeedback.heavyImpact();
 
@@ -121,324 +137,164 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
     }
   }
 
+  /// Skip is now only ever a decision the driver made: the auto-decline path
+  /// that fired on the invented countdown is gone. A Skip the server refused
+  /// must NOT pretend it declined — the card would just reappear on the
+  /// dashboard with no explanation.
   Future<void> _rejectBooking() async {
-    _timer?.cancel();
     setState(() => _isRejecting = true);
-    await _apiService.rejectBooking(booking.id);
+    final resp = await _apiService.rejectBooking(booking.id);
     if (!mounted) return;
     setState(() => _isRejecting = false);
-    Fluttertoast.showToast(msg: 'booking_declined'.tr);
-    Navigator.pop(context);
+    final ok = resp != null && (resp['code'] == 1 || resp['code'] == 200);
+    if (ok) {
+      // Remember the decline for this session. Without it the dashboard's
+      // post-pop refresh re-rendered the same offer, because the server keeps
+      // the booking pending for this driver either way.
+      SkippedBookings.add(booking.id);
+      Fluttertoast.showToast(msg: 'booking_declined'.tr);
+      Navigator.pop(context);
+    } else {
+      Fluttertoast.showToast(
+          msg: resp?['message']?.toString() ??
+              'Could not skip the booking. Try again.');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final countdownProgress = _remainingSeconds / _countdownSeconds;
-
     return Scaffold(
-      backgroundColor: Colors.grey.shade200,
-      body: Column(
+      backgroundColor: _grayBackground,
+      body: Stack(
         children: [
-          // Map area with back button overlay
-          Expanded(
-            flex: 3,
-            child: Stack(
-              children: [
-                if (_hasValidCoords)
-                  FlutterMap(
-                    options: MapOptions(
-                      initialCameraFit: CameraFit.bounds(
-                        bounds: _mapBounds,
-                        padding: const EdgeInsets.all(60),
-                      ),
-                    ),
-                    children: [
-                      TileLayer(
-                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        userAgentPackageName: 'com.movezy.driver',
-                      ),
-                      MarkerLayer(
-                        markers: [
-                          Marker(
-                            point: pickupLatLng,
-                            width: 40, height: 40,
-                            child: const Icon(Icons.location_on, color: Colors.green, size: 36),
-                          ),
-                          Marker(
-                            point: dropLatLng,
-                            width: 40, height: 40,
-                            child: const Icon(Icons.location_on, color: Colors.red, size: 36),
-                          ),
-                        ],
-                      ),
-                      PolylineLayer(
-                        polylines: [
-                          Polyline(
-                            points: [pickupLatLng, dropLatLng],
-                            color: AppColors.appColor,
-                            strokeWidth: 3,
-                          ),
-                        ],
-                      ),
-                    ],
-                  )
-                else
-                  Container(color: Colors.grey[300], child: Center(child: Text('map_not_available'.tr))),
+          Positioned.fill(child: _map()),
+          Align(alignment: Alignment.topCenter, child: _header()),
+          Align(alignment: Alignment.bottomCenter, child: _sheet()),
+        ],
+      ),
+    );
+  }
 
-                // Back button
-                Positioned(
-                  top: MediaQuery.of(context).padding.top + 10,
-                  left: 16,
-                  child: GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: Container(
-                      width: 40, height: 40,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 8)],
-                      ),
-                      child: const Icon(Icons.arrow_back_ios_new, size: 18),
-                    ),
-                  ),
-                ),
+  // Palette from the design.
+  static const _grayBackground = Color(0xFFF0F5FA);
+  static const _grayShade1 = Color(0xFF132235);
+  static const _grayShade2 = Color(0xFF364B63);
+  static const _grayShade4 = Color(0xFF94A3B3);
+  static const _grayShade5 = Color(0xFFD3DDE7);
+  static const _grayBorder = Color(0xFFE1E6EF);
+  static const _errorRed = Color(0xFFE02D3C);
+  static const _acceptGreen = Color(0xFF64B161);
 
-                // Countdown timer overlay (top right)
-                Positioned(
-                  top: MediaQuery.of(context).padding.top + 10,
-                  right: 16,
-                  child: Container(
-                    width: 56, height: 56,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 8)],
-                    ),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        SizedBox(
-                          width: 48, height: 48,
-                          child: CircularProgressIndicator(
-                            value: countdownProgress,
-                            strokeWidth: 4,
-                            backgroundColor: Colors.grey.shade200,
-                            valueColor: AlwaysStoppedAnimation(
-                              _remainingSeconds <= 10 ? Colors.red : AppColors.appColor,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          '$_remainingSeconds',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: _remainingSeconds <= 10 ? Colors.red : Colors.black87,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+  Widget _map() {
+    if (!_hasValidCoords) {
+      return Container(
+        color: const Color(0xFFE7EDF4),
+        alignment: Alignment.center,
+        child: Text('map_not_available'.tr,
+            style: const TextStyle(color: _grayShade2)),
+      );
+    }
+    return FlutterMap(
+      options: MapOptions(
+        initialCameraFit: CameraFit.bounds(
+          bounds: _mapBounds,
+          // Generous bottom inset: the sheet covers roughly the lower half, so
+          // an evenly padded fit would centre the route underneath it.
+          padding: const EdgeInsets.fromLTRB(60, 150, 60, 380),
+        ),
+      ),
+      children: [
+        TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.movezy.driver',
+        ),
+        PolylineLayer(
+          polylines: [
+            Polyline(
+              points: _roadRoute.isNotEmpty
+                  ? _roadRoute
+                  : [pickupLatLng, dropLatLng],
+              color: AppColors.appColor,
+              strokeWidth: 3,
+            ),
+          ],
+        ),
+        MarkerLayer(
+          markers: [
+            Marker(
+              point: pickupLatLng,
+              width: 34,
+              height: 34,
+              child: _pickupMarker(),
+            ),
+            Marker(
+              point: dropLatLng,
+              width: 44,
+              height: 56,
+              child: const Icon(Icons.location_on,
+                  color: _errorRed, size: 44),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// The design's pickup marker: a translucent halo around a white-ringed dot.
+  Widget _pickupMarker() => Center(
+        child: Container(
+          width: 22,
+          height: 22,
+          decoration: BoxDecoration(
+            color: AppColors.appColor.withValues(alpha: 0.3),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Container(
+              width: 13,
+              height: 13,
+              decoration: BoxDecoration(
+                color: AppColors.appColor,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      blurRadius: 6,
+                      offset: const Offset(0, 1)),
+                ],
+              ),
             ),
           ),
+        ),
+      );
 
-          // Bottom sheet
-          Expanded(
-            flex: 5,
-            child: Container(
-              width: double.infinity,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.only(topRight: Radius.circular(28), topLeft: Radius.circular(28)),
-              ),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // Drag handle
-                    Container(
-                      width: 40, height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // --- ESTIMATED EARNINGS BIG BOLD ---
-                    Text(
-                      '\u20B9${booking.estimatedFare.toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        fontSize: 44,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.black,
-                      ),
-                    ),
-                    Text(
-                      'estimated_earnings'.tr,
-                      style: const TextStyle(fontSize: 14, color: Colors.black54, fontWeight: FontWeight.w500),
-                    ),
-
-                    // Incentive below earnings in green
-                    if (booking.addonTotal > 0) ...[
-                      const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE8F5E9),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          '+\u20B9${booking.addonTotal.toStringAsFixed(0)} add-on bonus',
-                          style: const TextStyle(
-                            color: Color(0xFF2E7D32),
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ],
-
-                    const SizedBox(height: 18),
-
-                    // --- Pickup & Drop (short) ---
-                    _locationRow(
-                      color: const Color(0xFF1F8B4C),
-                      label: 'pickup'.tr,
-                      address: booking.pickupAddress,
-                    ),
-                    const SizedBox(height: 10),
-                    _locationRow(
-                      color: const Color(0xFFE02D3C),
-                      label: 'drop'.tr,
-                      address: booking.dropAddress,
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // Distance & duration row
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.straighten, size: 16, color: Colors.grey.shade600),
-                        const SizedBox(width: 4),
-                        Text('${booking.distanceKm.toStringAsFixed(1)} km', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                        const SizedBox(width: 16),
-                        Icon(Icons.schedule, size: 16, color: Colors.grey.shade600),
-                        const SizedBox(width: 4),
-                        Text('${booking.durationMin} min', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                        if (booking.paymentMethod.isNotEmpty) ...[
-                          const SizedBox(width: 16),
-                          Icon(Icons.payments_outlined, size: 16, color: Colors.grey.shade600),
-                          const SizedBox(width: 4),
-                          Text(booking.paymentMethod, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                        ],
-                      ],
-                    ),
-
-                    // Add-on services (compact)
-                    if (booking.addons.isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE1E6EF)),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('addons'.tr, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black54)),
-                            const SizedBox(height: 6),
-                            ...booking.addons.map((addon) => Padding(
-                              padding: const EdgeInsets.only(bottom: 3),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.add_circle_outline, color: AppColors.appColor, size: 14),
-                                  const SizedBox(width: 6),
-                                  Expanded(child: Text(addon.name, style: const TextStyle(fontSize: 12))),
-                                  Text("\u20B9${addon.price.toStringAsFixed(0)} x${addon.quantity}",
-                                    style: TextStyle(fontSize: 12, color: AppColors.appColor, fontWeight: FontWeight.w600)),
-                                ],
-                              ),
-                            )),
-                          ],
-                        ),
-                      ),
-                    ],
-
-                    const SizedBox(height: 24),
-
-                    // --- ACCEPT BUTTON (Big - Green - Dominant) ---
-                    SizedBox(
-                      width: double.infinity,
-                      height: 64,
-                      child: ElevatedButton(
-                        onPressed: _isAccepting || _isRejecting ? null : _acceptBooking,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1F8B4C),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-                          elevation: 4,
-                          shadowColor: const Color(0xFF1F8B4C).withValues(alpha: 0.4),
-                        ),
-                        child: _isAccepting
-                            ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-                            : Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.check_circle, size: 28),
-                                  const SizedBox(width: 10),
-                                  Text('accept'.tr, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 1)),
-                                ],
-                              ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // --- DECLINE BUTTON (Small - Red) ---
-                    SizedBox(
-                      width: double.infinity,
-                      height: 44,
-                      child: OutlinedButton(
-                        onPressed: _isAccepting || _isRejecting ? null : _rejectBooking,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFFE02D3C),
-                          side: const BorderSide(color: Color(0xFFE02D3C), width: 1.5),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                        child: _isRejecting
-                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Color(0xFFE02D3C), strokeWidth: 2))
-                            : Text('decline'.tr, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                      ),
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    // --- Ignore button (small at bottom) ---
-                    TextButton(
-                      onPressed: _isAccepting || _isRejecting ? null : () {
-                        _timer?.cancel();
-                        Navigator.pop(context);
-                      },
-                      child: Text(
-                        'ignore'.tr,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.grey.shade500,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+  Widget _header() {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.only(
+          top: MediaQuery.of(context).padding.top + 8, bottom: 18),
+      decoration: BoxDecoration(
+        color: AppColors.appColor,
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(30),
+          bottomRight: Radius.circular(30),
+        ),
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          const Text(
+            'Take Booking',
+            style: TextStyle(
+                color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700),
+          ),
+          Positioned(
+            left: 4,
+            child: IconButton(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.arrow_back_ios_new,
+                  color: Colors.white, size: 20),
             ),
           ),
         ],
@@ -446,24 +302,474 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
     );
   }
 
-  Widget _locationRow({required Color color, required String label, required String address}) {
-    return Row(
-      children: [
-        Container(
-          width: 10, height: 10,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+  Widget _sheet() {
+    return Container(
+      width: double.infinity,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.82,
+      ),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        boxShadow: [
+          BoxShadow(color: Color(0x59000000), blurRadius: 15, offset: Offset(0, 5)),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _sheetHeader(),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  children: [
+                    _pickupCard(),
+                    const SizedBox(height: 8),
+                    for (var i = 0; i < booking.stops.length; i++) ...[
+                      _stopCard(i),
+                      const SizedBox(height: 8),
+                    ],
+                    _destinationCard(),
+                    const SizedBox(height: 8),
+                    _earningsCard(),
+                    if (booking.addons.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      _addonsCard(),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            _actions(),
+          ],
         ),
-        const SizedBox(width: 10),
-        Text('$label: ', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color)),
-        Expanded(
-          child: Text(
-            address.isEmpty ? 'Not available' : address,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 13, color: Colors.black87),
+      ),
+    );
+  }
+
+  Widget _sheetHeader() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+      child: Column(
+        children: [
+          Container(
+            width: 32,
+            height: 4,
+            decoration: BoxDecoration(
+              color: _grayShade4,
+              borderRadius: BorderRadius.circular(100),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _tripTitle(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: _grayShade1),
+                ),
+              ),
+              const SizedBox(width: 10),
+              _grabNowPill(),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The design's orange badge.
+  ///
+  /// It used to carry a seconds counter and flip to "Expired" at zero. Both
+  /// were invented — see the note at the top of this state class. The badge now
+  /// says only what is true: the job goes to whichever driver takes it first,
+  /// so it can be gone before you tap Accept. No deadline is asserted.
+  Widget _grabNowPill() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.appColor,
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.bolt, color: Colors.white, size: 14),
+          SizedBox(width: 2),
+          Text(
+            'Grab now',
+            style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _card({required Widget icon, required Widget child}) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _grayBorder),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 3,
+                offset: const Offset(0, 1)),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(padding: const EdgeInsets.only(top: 1), child: icon),
+            const SizedBox(width: 8),
+            Expanded(child: child),
+          ],
+        ),
+      );
+
+  /// "07:45AM | 9.69KM | 60 Mins" — hairline-separated meta, as designed.
+  Widget _meta(List<String> parts) {
+    final items = <Widget>[];
+    for (var i = 0; i < parts.length; i++) {
+      if (i > 0) {
+        items
+          ..add(const SizedBox(width: 9))
+          ..add(Container(width: 1, height: 12, color: _grayShade5))
+          ..add(const SizedBox(width: 9));
+      }
+      items.add(Text(parts[i],
+          style: const TextStyle(
+              fontSize: 13, fontWeight: FontWeight.w700, color: _grayShade2)));
+    }
+    return Row(mainAxisSize: MainAxisSize.min, children: items);
+  }
+
+  Widget _cardTitleRow(String title, List<String> meta) => Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Text(title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: _grayShade1)),
+          ),
+          const SizedBox(width: 8),
+          if (meta.isNotEmpty)
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: _meta(meta),
+              ),
+            ),
+        ],
+      );
+
+  Widget _address(String value) => Text(
+        value.isEmpty ? 'Address not available' : value,
+        style: const TextStyle(
+            fontSize: 13, height: 1.38, color: _grayShade2),
+      );
+
+  Widget _pickupCard() => _card(
+        icon: SizedBox(width: 20, height: 20, child: _pickupMarker()),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Only the pickup time is shown: the design's second figure is the
+            // distance from the driver to the pickup, which this payload does
+            // not carry. The map above already conveys it.
+            _cardTitleRow('Pickup', [
+              if (_pickupTime().isNotEmpty) _pickupTime(),
+            ]),
+            const SizedBox(height: 4),
+            _address(booking.pickupAddress),
+          ],
+        ),
+      );
+
+  /// One intermediate drop of a multi-stop ride, numbered in delivery order.
+  Widget _stopCard(int index) {
+    final stop = booking.stops[index];
+    return _card(
+      icon: Container(
+        width: 20,
+        height: 20,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppColors.appColor,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          '${index + 1}',
+          style: const TextStyle(
+              fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _cardTitleRow('Stop ${index + 1}', []),
+          const SizedBox(height: 4),
+          _address(stop.address),
+        ],
+      ),
+    );
+  }
+
+  Widget _destinationCard() => _card(
+        icon: const Icon(Icons.location_on, size: 20, color: _errorRed),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _cardTitleRow(
+                booking.stops.isEmpty ? 'Destination' : 'Final drop', [
+              '${booking.distanceKm.toStringAsFixed(2)}KM',
+              '${booking.durationMin} Mins',
+            ]),
+            const SizedBox(height: 4),
+            _address(booking.dropAddress),
+          ],
+        ),
+      );
+
+  Widget _earningsCard() {
+    // estimatedEarnings is the driver's own settlement estimate (subtotal minus
+    // commission, pre-GST) — the same basis the payout screen uses. The gross
+    // customer fare lives in estimatedFare and must never wear this label.
+    final earnings = booking.estimatedEarnings > 0
+        ? booking.estimatedEarnings
+        : booking.estimatedFare;
+    final estimateOnly = booking.estimatedEarnings <= 0;
+
+    return _card(
+      icon: Icon(Icons.currency_rupee, size: 20, color: AppColors.appColor),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('₹${earnings.toStringAsFixed(0)}',
+                    style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: _grayShade1)),
+                const SizedBox(height: 4),
+                Text(
+                  estimateOnly
+                      ? 'Trip value (earnings pending)'
+                      : 'Your estimated earnings',
+                  style: const TextStyle(fontSize: 13, color: _grayShade2),
+                ),
+              ],
+            ),
+          ),
+          // Add-on work is already inside the settlement base, so this is
+          // labelled "incl." rather than shown as an additive bonus.
+          if (booking.addonTotal > 0)
+            Text(
+              'incl. ₹${booking.addonTotal.toStringAsFixed(0)}',
+              style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.appColor),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _addonsCard() => _card(
+        icon: Icon(Icons.add_task, size: 20, color: AppColors.appColor),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Add-on work',
+                style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: _grayShade1)),
+            const SizedBox(height: 4),
+            ...booking.addons.map(
+              (a) => Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        a.quantity > 1 ? '${a.name} x${a.quantity}' : a.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13, color: _grayShade2),
+                      ),
+                    ),
+                    Text('₹${a.price.toStringAsFixed(0)}',
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: _grayShade2)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _actions() {
+    final busy = _isAccepting || _isRejecting;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Column(
+        // min, so this block reports its true height to the sheet's Column and
+        // is laid out after the scroll area rather than competing with it.
+        mainAxisSize: MainAxisSize.min,
+        // stretch, so buttons fill the sheet width instead of shrinking to
+        // their label — a Column's default centre alignment gives children
+        // loose constraints, which is what collapsed them.
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _actionButton(
+            label: 'Skip Booking',
+            colour: _errorRed,
+            iconOnRight: true,
+            icon: Icons.keyboard_double_arrow_left,
+            busy: _isRejecting,
+            onTap: busy ? null : _rejectBooking,
+          ),
+          const SizedBox(height: 16),
+          _actionButton(
+            label: 'Accept Booking',
+            colour: _acceptGreen,
+            iconOnRight: false,
+            icon: Icons.keyboard_double_arrow_right,
+            busy: _isAccepting,
+            onTap: busy ? null : _acceptBooking,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _actionButton({
+    required String label,
+    required Color colour,
+    required bool iconOnRight,
+    required IconData icon,
+    required bool busy,
+    required VoidCallback? onTap,
+  }) {
+    final chip = Container(
+      width: 56,
+      height: 44,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Icon(icon, color: colour, size: 26),
+    );
+
+    return Opacity(
+      opacity: onTap == null && !busy ? 0.6 : 1,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: double.infinity,
+          height: 48,
+          decoration: BoxDecoration(
+            color: colour,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Padding(
+                // Symmetric, so the label sits centred in the bar and stays
+                // clear of the 56px chip on whichever side it sits.
+                padding: const EdgeInsets.symmetric(horizontal: 64),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700),
+                ),
+              ),
+              Positioned(
+                left: iconOnRight ? null : 2,
+                right: iconOnRight ? 2 : null,
+                top: 2,
+                child: busy
+                    ? SizedBox(
+                        width: 56,
+                        height: 44,
+                        child: Center(
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                color: colour, strokeWidth: 2.4),
+                          ),
+                        ),
+                      )
+                    : chip,
+              ),
+            ],
           ),
         ),
-      ],
+      ),
     );
+  }
+
+  /// The sheet's heading. There is no one-way/round-trip flag on a booking —
+  /// every job here is a single pickup to a single drop — so this states what
+  /// the trip actually is rather than echoing the mock's label.
+  String _tripTitle() {
+    final vehicle = booking.vehicleTypeName.trim();
+    final service = switch (booking.serviceType) {
+      'WITHIN_CITY' => 'Within City',
+      'OUTSTATION' => 'Outstation',
+      _ => booking.serviceType.replaceAll('_', ' ').trim(),
+    };
+    if (vehicle.isEmpty && service.isEmpty) return 'New Booking';
+    if (vehicle.isEmpty) return service;
+    if (service.isEmpty) return vehicle;
+    return '$vehicle · $service';
+  }
+
+  /// Scheduled pickup time where there is one, else when the job was raised.
+  /// Parsed then converted to local — the backend also sends the literal
+  /// string "null", which must not be shown as a time.
+  String _pickupTime() {
+    for (final raw in [booking.scheduledAt, booking.createdAt]) {
+      if (raw.isEmpty || raw == 'null') continue;
+      final dt = DateTime.tryParse(raw);
+      if (dt == null) continue;
+      return DateFormat('hh:mma').format(dt.toLocal());
+    }
+    return '';
   }
 }

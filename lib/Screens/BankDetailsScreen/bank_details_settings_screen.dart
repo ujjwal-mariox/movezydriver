@@ -144,8 +144,19 @@ class _BankDetailsSettingsScreenState extends State<BankDetailsSettingsScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      bottomNavigationBar: Container(
-        height: 82,
+      // top: false — the bar owns only the bottom edge. Without this the box
+      // ends at the screen edge and the gesture bar / nav buttons sit on top of
+      // "Save", making it untappable. SafeArea reads the real device inset (and
+      // correctly reports 0 while the keyboard is up, so the button still rides
+      // directly above the keyboard on this form).
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+        // 90, matching the onboarding BankDetailsScreen. At 82 the box was 4px
+        // shorter than its children (15 + ButtonWidget's default 56 + 15 = 86),
+        // so the Column overflowed and clipped the bottom of the button —
+        // on every device, no narrow screen or text scale needed.
+        height: 90,
         decoration: BoxDecoration(color: Colors.grey[100]),
         child: Column(
           children: [
@@ -161,6 +172,7 @@ class _BankDetailsSettingsScreenState extends State<BankDetailsSettingsScreen> {
             ),
             const SizedBox(height: 15),
           ],
+        ),
         ),
       ),
       body: _loading

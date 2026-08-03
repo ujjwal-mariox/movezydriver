@@ -180,16 +180,29 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           ),
 
           Expanded(
+            // Pull-to-refresh, as the wallet screen has: a settlement landing
+            // while this page sat open otherwise never appeared without
+            // re-entering.
             child: _loading
                 ? Center(
                     child:
                         CircularProgressIndicator(color: AppColors.appColor))
-                : _filteredTransactions.isEmpty
-                    ? Center(
-                        child: Text('no_transactions'.tr,
-                            style: const TextStyle(
-                                fontSize: 14, color: Colors.grey)))
-                    : _buildList(),
+                : RefreshIndicator(
+                    color: AppColors.appColor,
+                    onRefresh: _fetchTransactions,
+                    child: _filteredTransactions.isEmpty
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              const SizedBox(height: 200),
+                              Center(
+                                  child: Text('no_transactions'.tr,
+                                      style: const TextStyle(
+                                          fontSize: 14, color: Colors.grey))),
+                            ],
+                          )
+                        : _buildList(),
+                  ),
           ),
         ],
       ),
@@ -222,6 +235,8 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     final transactions = _filteredTransactions;
     return ListView.builder(
       controller: _scrollController,
+      // Always scrollable so pull-to-refresh works on a short list too.
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       itemCount: transactions.length + (_loadingMore ? 1 : 0),
       itemBuilder: (context, index) {

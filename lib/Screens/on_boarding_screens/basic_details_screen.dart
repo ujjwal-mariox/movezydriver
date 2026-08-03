@@ -50,7 +50,14 @@ class _BasicDetailsScreenState extends State<BasicDetailsScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      bottomNavigationBar: Container(
+      // top: false — the bar owns only the bottom edge. Without this the 90pt
+      // box ends at the screen edge and the gesture bar / nav buttons sit on
+      // top of "Save & Continue", making it untappable. SafeArea reads the real
+      // device inset (and correctly reports 0 while the keyboard is up, so the
+      // button still rides directly above the keyboard on this form).
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
         height: 90,
         decoration: BoxDecoration(color: Colors.grey[100]),
         child: Column(
@@ -116,6 +123,7 @@ class _BasicDetailsScreenState extends State<BasicDetailsScreen> {
 
             SizedBox(height: 16,),
           ],
+        ),
         ),
       ),
       body: Stack(

@@ -169,6 +169,9 @@ class SupportSocket {
       IO.OptionBuilder()
           .setTransports(['websocket', 'polling'])
           .setAuth({'token': Prefs.accessToken})
+          // Own connection: dispose() below would otherwise kill the shared
+          // socket used by the dashboard and location tracking.
+          .enableForceNew()
           .enableAutoConnect()
           .enableReconnection()
           .build(),

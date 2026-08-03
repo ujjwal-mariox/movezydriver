@@ -45,9 +45,18 @@ class OnboardingStepper extends StatelessWidget {
               children: [
                 Icon(Icons.rocket_launch, color: AppColors.appColor, size: 18),
                 const SizedBox(width: 8),
-                Text(
-                  'complete_onboarding'.tr,
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.appColor),
+                // Expanded, so the copy wraps instead of overflowing. As a bare
+                // Row child it got unbounded width and laid out on one line at
+                // intrinsic width. English clears a 320dp screen by ~3px, which
+                // is why it looked fine — but this app ships a language
+                // selector, and the Hindi string overflows a 360dp phone at
+                // DEFAULT text scale. It renders on all three onboarding steps,
+                // the first screens any new driver sees.
+                Expanded(
+                  child: Text(
+                    'complete_onboarding'.tr,
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.appColor),
+                  ),
                 ),
               ],
             ),
@@ -91,7 +100,15 @@ class OnboardingStepper extends StatelessWidget {
                 );
               }
               final stepIndex = index ~/ 2;
-              return _buildStep(stepIndex);
+              // Flexible, so the label is bounded and can wrap. As a bare Row
+              // child the step Column got unbounded width and its label laid
+              // out at intrinsic width. English totals ~191dp of the 328dp on a
+              // 360dp screen, so it fit — but the Tamil/Malayalam labels total
+              // ~265dp and overflow once text scale passes ~1.25, and every
+              // language overflows by 1.5. Loose fit keeps steps that already
+              // fit at their natural width; flex 1 matches the ~64dp each step
+              // occupies today, so the connectors stay flush.
+              return Flexible(child: _buildStep(stepIndex));
             }),
           ),
         ],
@@ -148,6 +165,10 @@ class OnboardingStepper extends StatelessWidget {
                     : Colors.grey.shade500,
           ),
           textAlign: TextAlign.center,
+          // Two lines then ellipsis: the localized labels are two words, so
+          // wrapping keeps them readable where truncating would not.
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
         ),
       ],
     );

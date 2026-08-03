@@ -1,12 +1,26 @@
+import 'dart:convert';
 
+import 'package:http/http.dart' as http;
 
 class ApiUrls {
-  // Physical device → local backend on this PC's LAN IP (phone on same WiFi)
-  static String baseUrlApi = "http://192.168.1.34:9050/v1/api";
+  /// Backend origin, chosen at BUILD time.
+  ///
+  /// This used to be a hand-edited constant with the other environments
+  /// commented out beneath it — so whichever line was uncommented when someone
+  /// hit build is what shipped, and a local-testing URL in a release APK is a
+  /// dead app on every device that isn't tethered to that machine.
+  ///
+  /// Production is the default: a plain `flutter build apk` is always safe.
+  /// For local work pass the override:
+  ///   flutter run --dart-define=API_ORIGIN=http://127.0.0.1:9050
+  static const String _origin = String.fromEnvironment(
+    'API_ORIGIN',
+    defaultValue: 'https://movezybackend.onrender.com',
+  );
+
+  static String baseUrlApi = "$_origin/v1/api";
   // Production API endpoint
-  // static String baseUrlApi = "https://movize-backend.maidkart.in/v1/api";
   // Local development: Android emulator uses 10.0.2.2 to reach host machine's localhost
-  // static String baseUrlApi = "http://10.0.2.2:9050/v1/api";
 
   static String loginUrl = "$baseUrlApi/driver/login";
 
@@ -33,6 +47,12 @@ class ApiUrls {
   static String addSelfieUrl = "$baseUrlApi/driver/kyc/selfie";
 
   static String addRcDetailsApi = "$baseUrlApi/driver/kyc/rc";
+
+  // Server-side logout — sets isOnline:false so dispatch stops targeting them.
+  static String driverLogoutUrl = "$baseUrlApi/driver/logout";
+
+  // Admin-managed vehicle-type catalog (populates the Add Vehicle dropdown).
+  static String driverVehicleTypesUrl = "$baseUrlApi/driver/vehicle-types";
 
   static String addLicenceApi = "$baseUrlApi/driver/kyc/driving-license";
 
@@ -103,6 +123,8 @@ class ApiUrls {
   static String driverRejectBookingUrl(String bookingId) => "$baseUrlApi/driver/app/bookings/$bookingId/reject";
 
   static String driverArrivedBookingUrl(String bookingId) => "$baseUrlApi/driver/app/bookings/$bookingId/arrived";
+  // Driver cancels an assigned booking (pre-pickup) — returns it to the pool.
+  static String driverCancelBookingUrl(String bookingId) => "$baseUrlApi/driver/app/bookings/$bookingId/cancel";
 
   // Trip lifecycle: verify pickup OTP → start → complete → collect cash
   static String driverVerifyOtpUrl(String bookingId) => "$baseUrlApi/driver/app/bookings/$bookingId/verify-otp";
@@ -124,8 +146,8 @@ class ApiUrls {
 
   // Socket.io base URL (no /v1/api path) — must match the API server the app
   // uses so driver + customer land in the same chat room.
-  static String socketUrl = "http://192.168.1.34:9050";
-  // static String socketUrl = "https://movize-backend.maidkart.in";
+  /// Socket.io origin — same host as the API, no /v1/api suffix.
+  static String socketUrl = _origin;
 
   // Vehicle Referral
   static String vehicleApplyReferralUrl(String vehicleId) => "$baseUrlApi/driver/app/my-vehicles/$vehicleId/apply-referral";
@@ -133,11 +155,64 @@ class ApiUrls {
   // SOS / Emergency
   static String sosTriggerUrl = "$baseUrlApi/driver/app/sos/trigger";
 
-  // Support phone number shown in Help & Support call actions. PLACEHOLDER —
-  // replace with the real support line before release (single source of truth;
-  // previously this number was hardcoded in 3 places in help_support_screen).
-  static String supportPhoneNumber = "+911234567890";
+  /// Support helpline, published by admin.
+  ///
+  /// Public (no auth) so it can be read before login. Verified shape — this is
+  /// a bare handler in the backend's routes/index.ts, NOT one of the
+  /// `{code, message, data}` envelope routes:
+  ///   `{ "success": true, "data": { "supportPhone": "<string>" } }`
+  /// `supportPhone` is `""` whenever the admin has not set one
+  /// (`AppConfig` key `SUPPORT_PHONE`, edited at /admin/config/support-contact).
+  static String supportContactUrl = "$baseUrlApi/support-contact";
+
+  /// The number the app is allowed to dial, as configured by admin.
+  ///
+  /// EMPTY until [loadSupportContact] has fetched a non-empty value, and empty
+  /// whenever no number is configured. An empty value means "no helpline" —
+  /// every call control (including the post-accident escalation) must be
+  /// hidden while [hasSupportPhone] is false rather than dialling anything.
+  ///
+  /// This was hardcoded to `"+911234567890"`, a placeholder that every call
+  /// control in the app dialled: a driver escalating an accident was sent to a
+  /// number that belongs to a stranger. Never hardcode a number here again —
+  /// the value comes from the server or the controls stay hidden.
+  static String supportPhoneNumber = "";
+
+  /// True only when a real, admin-configured number is available to dial.
+  static bool get hasSupportPhone => supportPhoneNumber.trim().isNotEmpty;
+
+  /// Refresh [supportPhoneNumber] from [supportContactUrl].
+  ///
+  /// Never throws and never guesses: on any failure (network, non-200,
+  /// unexpected body) the cached value is left exactly as it was, so a bad
+  /// response can't turn "no helpline" into a dialled number.
+  static Future<void> loadSupportContact() async {
+    try {
+      final response = await http
+          .get(Uri.parse(supportContactUrl))
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) return;
+      final body = json.decode(response.body);
+      if (body is! Map) return;
+      final data = body['data'];
+      if (data is! Map) return;
+      if (!data.containsKey('supportPhone')) return;
+      supportPhoneNumber = (data['supportPhone'] ?? '').toString().trim();
+    } catch (_) {
+      // Leave the cached value untouched.
+    }
+  }
 
   // Incentives / Awards (real summary computed from completed bookings)
   static String driverIncentivesUrl = "$baseUrlApi/driver/app/incentives";
+  // Bonuses actually awarded (the ledger), not the live tracker summary.
+  static String driverIncentiveHistoryUrl =
+      "$baseUrlApi/driver/app/incentives/history";
+  // What customers said. The ratings always existed on bookings; nothing ever
+  // showed them back to the driver.
+  static String driverReviewsUrl = "$baseUrlApi/driver/app/reviews";
+  // The inbox behind the bell in the bottom nav. The endpoint has always been
+  // real (list + unreadCount + mark-read); the app simply had no screen for it.
+  static String driverNotificationsUrl =
+      "$baseUrlApi/driver/app/notifications";
 }

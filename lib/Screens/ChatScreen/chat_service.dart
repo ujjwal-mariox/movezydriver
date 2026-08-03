@@ -62,6 +62,12 @@ class ChatService {
       IO.OptionBuilder()
           .setTransports(['websocket', 'polling'])
           .setAuth({'token': Prefs.accessToken})
+          // forceNew is required: socket_io_client caches connections per URL,
+          // and this app opens several (dashboard, location tracking, support).
+          // Without it, chat reuses an already-connected socket, onConnect never
+          // fires again, chat:join is never sent, and dispose() here would tear
+          // down the other services' shared socket.
+          .enableForceNew()
           .enableAutoConnect()
           .enableReconnection()
           .build(),
@@ -70,9 +76,7 @@ class ChatService {
     _socket!.onConnect((_) {
       debugPrint('Chat socket connected');
       isConnected.value = true;
-      _socket!.emit('chat:join', {'bookingId': bookingId});
-      // Mark existing messages as read
-      _socket!.emit('chat:read', {'bookingId': bookingId});
+      _joinRoom();
     });
 
     _socket!.onDisconnect((_) {
@@ -98,6 +102,19 @@ class ChatService {
     _socket!.on('chat:error', (data) {
       debugPrint('Chat error: $data');
     });
+
+    // Socket.io does not replay 'connect' for listeners added after the socket
+    // is already connected, so join explicitly in that case.
+    if (_socket!.connected) {
+      isConnected.value = true;
+      _joinRoom();
+    }
+  }
+
+  /// Join the booking room and mark existing messages as read.
+  void _joinRoom() {
+    _socket!.emit('chat:join', {'bookingId': bookingId});
+    _socket!.emit('chat:read', {'bookingId': bookingId});
   }
 
   /// Send a text message

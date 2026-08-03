@@ -16,6 +16,7 @@ import 'package:movezy_driver_app/Screens/MyProfileScreen/my_profile_api_service
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
 import 'package:movezy_driver_app/Utils/ImageQualityValidator/image_quality_validator.dart';
 import 'package:movezy_driver_app/Screens/CropScreen/crop_screen.dart';
+import 'package:movezy_driver_app/Screens/DriverProfileApp/my_badge_screen.dart';
 
 class DriverProfileScreen extends StatefulWidget {
   final DriverProfileBundle? initialProfile;
@@ -275,19 +276,20 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                   margin: const EdgeInsets.only(right: 12),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(100),
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(99),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.star, color: Colors.amber, size: 18),
-                      const SizedBox(width: 4),
+                      Icon(Icons.star_rounded,
+                          color: AppColors.appColor, size: 18),
+                      const SizedBox(width: 3),
                       Text(
                         _profile!.rating.toStringAsFixed(1),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
+                        style: TextStyle(
+                          color: AppColors.appColor,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
@@ -370,7 +372,12 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
         const SizedBox(height: 8),
         _strip(),
         const SizedBox(height: 12),
-        _sectionHeader('Badges', _yearLabel()),
+        _sectionHeader('Badges', 'my_badge'.tr,
+            onTrailingTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const MyBadgeScreen()),
+                )),
         const SizedBox(height: 12),
         if (_badgesLoading && _badges.isEmpty)
           const Padding(
@@ -386,23 +393,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
             child: Center(child: Text('no_badges'.tr, style: const TextStyle(color: Color(0xFF8C9098), fontSize: 13))),
           )
         else
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Wrap(
-              spacing: 14,
-              runSpacing: 14,
-              children: _badges.map((badge) {
-                final isUnlocked = badge['isUnlocked'] == true;
-                return SizedBox(
-                  width: (MediaQuery.of(context).size.width - 54) / 2,
-                  child: BadgeCard(
-                    emoji: badge['icon'] ?? '🏆',
-                    title: badge['name'] ?? '',
-                    subtitle: badge['progressLabel'] ?? '',
-                    isUnlocked: isUnlocked,
-                  ),
-                );
-              }).toList(),
+          SizedBox(
+            height: 192,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              itemCount: _badges.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 28),
+              itemBuilder: (_, i) => _badgeRing(_badges[i]),
             ),
           ),
         const SizedBox(height: 20),
@@ -427,31 +425,52 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                         'DL Status',
                         style: TextStyle(fontSize: 14, color: Colors.grey),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1F8B4C).withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.verified, color: Color(0xFF1F8B4C), size: 16),
-                            SizedBox(width: 4),
-                            Text(
-                              'DL Verified',
-                              style: TextStyle(
-                                color: Color(0xFF1F8B4C),
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
+                      // Reflect the REAL verification state. This badge was
+                      // hardcoded to "DL Verified" for every driver, so an
+                      // unverified/under-review driver saw a false claim.
+                      Builder(builder: (_) {
+                        final verified = profile.isKycVerified;
+                        final color = verified
+                            ? const Color(0xFF1F8B4C)
+                            : const Color(0xFFB26A00);
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                verified
+                                    ? Icons.verified
+                                    : Icons.hourglass_bottom,
+                                color: color,
+                                size: 16,
                               ),
-                            ),
-                          ],
-                        ),
-                      ),
+                              const SizedBox(width: 4),
+                              Text(
+                                verified ? 'DL Verified' : 'Under review',
+                                style: TextStyle(
+                                  color: color,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
                     ],
                   ),
                   const SizedBox(height: 8),
+                  if (profile.license.number.trim().isNotEmpty)
+                    LicenseRow(
+                      label: 'DL Number',
+                      value: profile.license.number,
+                    ),
                   LicenseRow(
                     label: 'DL Expiry Date',
                     value: _formatLicenseDate(profile.license.expiryDate),
@@ -535,6 +554,89 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     );
   }
 
+  /// One badge as the design draws it: a 118px ring with the emoji inside, a
+  /// small corner medallion, and title + subtitle beneath. Unlocked rings are
+  /// green (orange for the KYC/profile badge); locked ones grey out.
+  Widget _badgeRing(Map<String, dynamic> badge) {
+    final unlocked = badge['isUnlocked'] == true;
+    final name = (badge['name'] ?? '').toString();
+    final isKycBadge = name.toLowerCase().contains('verif') ||
+        (badge['code'] ?? '').toString().toUpperCase().contains('KYC');
+    final ringColor = !unlocked
+        ? HexColor('#D3DDE7')
+        : isKycBadge
+            ? AppColors.appColor
+            : const Color(0xFF3CB882);
+
+    return SizedBox(
+      width: 130,
+      child: Column(
+        children: [
+          SizedBox(
+            width: 122,
+            height: 122,
+            child: Stack(
+              children: [
+                Center(
+                  child: Container(
+                    width: 118,
+                    height: 118,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: ringColor, width: 2),
+                    ),
+                    child: Center(
+                      child: Opacity(
+                        opacity: unlocked ? 1 : 0.35,
+                        child: Text(
+                          (badge['icon'] ?? '🏆').toString(),
+                          style: const TextStyle(fontSize: 48),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (unlocked)
+                  Positioned(
+                    top: 4,
+                    right: 0,
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: ringColor,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                      child: const Icon(Icons.check,
+                          color: Colors.white, size: 16),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            (badge['progressLabel'] ?? '').toString(),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11.5, color: subtitleGray),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _strip() {
     return Container(
       height: 8,
@@ -543,20 +645,38 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     );
   }
 
-  Widget _sectionHeader(String title, String trailing) {
+  Widget _sectionHeader(String title, String trailing,
+      {VoidCallback? onTrailingTap}) {
+    final pill = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: HexColor('#E1E6EF')),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(trailing,
+              style: TextStyle(
+                  fontSize: 13,
+                  color: onTrailingTap != null
+                      ? AppColors.appColor
+                      : subtitleGray)),
+          if (onTrailingTap != null) ...[
+            const SizedBox(width: 3),
+            Icon(Icons.chevron_right, size: 16, color: AppColors.appColor),
+          ],
+        ],
+      ),
+    );
     return Row(
       children: [
         const SizedBox(width: 25),
         Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
         const Spacer(),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: HexColor('#E1E6EF')),
-          ),
-          child: Text(trailing, style: const TextStyle(fontSize: 13, color: subtitleGray)),
-        ),
+        onTrailingTap != null
+            ? InkWell(onTap: onTrailingTap, child: pill)
+            : pill,
         const SizedBox(width: 25),
       ],
     );
@@ -564,14 +684,15 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
 
   Widget _chip(String label) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: HexColor('#F8FAFC'),
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: HexColor('#E1E6EF')),
       ),
       child: Text(
         label,
-        style: const TextStyle(color: Color(0xFF4B5563), fontSize: 11),
+        style: const TextStyle(color: Color(0xFF364B63), fontSize: 13),
       ),
     );
   }

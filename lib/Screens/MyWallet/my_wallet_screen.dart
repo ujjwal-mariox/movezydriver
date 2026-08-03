@@ -29,6 +29,10 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
   final DashboardApiService _api = DashboardApiService();
   // Withdrawable earnings info (from /wallet/withdrawal-info).
   double _available = 0;
+  // Real earnings: Σ driverEarnings frozen on each COMPLETED booking + awarded
+  // incentives, computed server-side. This is the only earnings figure the app
+  // can get; there is no per-week earnings endpoint.
+  double _lifetimeEarnings = 0;
   double _minWithdrawal = 100;
   bool _hasBankDetails = false;
   bool _submittingWithdrawal = false;
@@ -45,6 +49,7 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
     if (info != null && mounted) {
       setState(() {
         _available = (info['available'] ?? 0).toDouble();
+        _lifetimeEarnings = (info['lifetimeEarnings'] ?? 0).toDouble();
         _minWithdrawal = (info['minWithdrawal'] ?? 100).toDouble();
         _hasBankDetails = info['hasBankDetails'] == true;
       });
@@ -77,24 +82,14 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
     }
   }
 
-  // Compute this week's earnings from CREDIT transactions
-  double get _weeklyEarnings {
-    final now = DateTime.now();
-    final weekStart = now.subtract(Duration(days: now.weekday - 1));
-    final weekStartDate = DateTime(weekStart.year, weekStart.month, weekStart.day);
-    double total = 0;
-    for (final txn in _transactions) {
-      if (txn['type'] != 'CREDIT') continue;
-      final dateStr = txn['createdAt'] ?? '';
-      if (dateStr is String && dateStr.isNotEmpty) {
-        final date = DateTime.tryParse(dateStr)?.toLocal();
-        if (date != null && date.isAfter(weekStartDate)) {
-          total += (txn['amount'] ?? 0).toDouble();
-        }
-      }
-    }
-    return total;
-  }
+  // A "_weeklyEarnings" getter used to live here, feeding the "This Week's
+  // Earnings" label. It summed CREDIT rows of the driver's WALLET — and the
+  // only thing that ever credits a driver wallet is the driver's own Razorpay
+  // top-up; no trip money is written to it anywhere in the backend. So a real,
+  // non-zero number — the driver's own deposits — was displayed as earnings.
+  // Real driver earnings live on the booking as driverEarnings, frozen at
+  // completion, and reach the app as the server-computed lifetime total from
+  // /wallet/withdrawal-info, which is what the card now shows.
 
   String _formatDescription(dynamic txn) {
     final desc = txn['description'] ?? '';
@@ -134,22 +129,40 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
               children: [
                 Icon(Icons.info_outline, color: AppColors.appColor, size: 24),
                 const SizedBox(width: 10),
-                Text('why_recharge_title'.tr, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                // Expanded: bare Row child next to the icon got unbounded width, so a
+                // long translated title could never wrap or ellipsize.
+                Expanded(
+                  child: Text(
+                    'why_recharge_title'.tr,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 16),
+            // Every one of the four bullets that used to sit here was false, and
+            // together they pressured drivers into depositing money:
+            //   "Pay platform commission fees"        - commission is taken off
+            //      the trip settlement at completion, never from this wallet.
+            //   "Cover insurance and safety deposits" - no such mechanism exists.
+            //   "Ensure uninterrupted booking acceptance" and the minimum-balance
+            //      line - accepting a booking checks driver status, vehicle and
+            //      whether a trip is already active. It never checks a balance.
+            //   "Access premium features and priority booking" - no such feature.
+            // Nothing in the backend debits a driver wallet at all. Only what is
+            // actually true is stated here.
             const Text(
-              'Your wallet balance is used to:',
+              'About your wallet',
               style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 10),
-            _infoPoint('Pay platform commission fees'),
-            _infoPoint('Cover insurance and safety deposits'),
-            _infoPoint('Ensure uninterrupted booking acceptance'),
-            _infoPoint('Access premium features and priority booking'),
+            _infoPoint('Your earnings from completed trips are settled here'),
+            _infoPoint('You can withdraw your available balance to your registered bank account'),
             const SizedBox(height: 16),
             const Text(
-              'Maintaining a minimum balance ensures you can accept bookings without interruption.',
+              'Commission is already deducted from each trip before it reaches you — you never pay it from this wallet.',
               style: TextStyle(fontSize: 13, color: Colors.black54, height: 1.5),
             ),
             const SizedBox(height: 20),
@@ -314,8 +327,24 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
+                  // The 'withdrawal_note' key this used to render ended with
+                  // "usually within 1–2 business days" — the last of the three
+                  // payout timings the app quoted (the others were "Next
+                  // Payout: Every Monday" on the balance card and a "24-48
+                  // hours" line in the FAQ, both already removed). No schedule
+                  // or turnaround exists to quote: a withdrawal is a Payout row
+                  // that goes PENDING → APPROVED → PAID entirely at an
+                  // operator's hand, with nothing timed anywhere in the
+                  // backend. What is left states only the part that is true and
+                  // says nothing about when.
+                  //
+                  // Plain English rather than a key because the localisation
+                  // files are outside this change and only the English map ever
+                  // defined 'withdrawal_note' — a correct English line beats a
+                  // localised untruth. Add an honest key and swap it in when
+                  // the translations are next touched.
                   Text(
-                    'withdrawal_note'.tr,
+                    'Withdrawals are paid to your registered bank account after your request is approved.',
                     style: TextStyle(fontSize: 11, color: Colors.grey.shade500, height: 1.4),
                   ),
                   const SizedBox(height: 6),
@@ -430,7 +459,17 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            Text('my_wallet'.tr, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+            // Flexible: bare Row child got unbounded width, so at large text scale a
+            // long translation squeezed the Spacer to zero and overflowed. Flexible
+            // (not Expanded) keeps the title at its intrinsic width when it fits.
+            Flexible(
+              child: Text(
+                'my_wallet'.tr,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+              ),
+            ),
             const Spacer(),
           ],
         ),
@@ -466,7 +505,14 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
             style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 16),
-          // This Week's Earnings
+          // Total earnings — the server's lifetimeEarnings from
+          // /wallet/withdrawal-info (completed-trip driverEarnings + awarded
+          // incentives). This row was labelled "This Week's Earnings" over a
+          // wallet top-up total; the label now says exactly what the number is.
+          // The label is plain English because there is no translation key for
+          // it and the localisation files are outside this change — a correct
+          // English label beats a localised untruth. Add a `total_earnings` key
+          // and swap it in when the translations are next touched.
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
@@ -476,8 +522,18 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('this_weeks_earnings'.tr, style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                Text(_money.format(_weeklyEarnings), style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+                // Expanded: as a bare Row child the label got unbounded width, so a
+                // long label could never ellipsize. The amount stays non-flex,
+                // so it still sits hard right exactly as spaceBetween put it.
+                const Expanded(
+                  child: Text(
+                    'Total earnings (all time)',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                ),
+                Text(_money.format(_lifetimeEarnings), style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
               ],
             ),
           ),
@@ -492,27 +548,25 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('available_to_withdraw'.tr, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                // Expanded: bare Row child got unbounded width, so the translated
+                // label could never ellipsize against the amount.
+                Expanded(
+                  child: Text(
+                    'available_to_withdraw'.tr,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                ),
                 Text(_money.format(_available), style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
               ],
             ),
           ),
-          const SizedBox(height: 16),
-          // Next Payout Date placeholder
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('next_payout'.tr, style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                Text('every_monday'.tr, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ),
+          // A "Next Payout: Every Monday" row used to sit here. No such schedule
+          // exists anywhere: a payout is created only when the driver taps
+          // Withdraw below, and it is released when an operator approves it in
+          // the admin payout queue. There is no weekly run and no server-side
+          // next-payout date to read, so the row is gone rather than guessing.
           const SizedBox(height: 20),
           // WITHDRAW BUTTON (big)
           SizedBox(
@@ -591,7 +645,17 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
           children: [
             Icon(icon, color: color, size: 22),
             const SizedBox(width: 8),
-            Text(label, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: color)),
+            // Flexible: bare Row child got unbounded width. Each button is only half
+            // the screen wide, so the label + icon(s) overflow once text scale grows.
+            // Loose fit keeps the row centred at normal sizes.
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: color),
+              ),
+            ),
             if (showInfo) ...[
               const SizedBox(width: 6),
               GestureDetector(

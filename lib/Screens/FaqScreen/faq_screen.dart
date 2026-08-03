@@ -1,12 +1,14 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/CommonWidgets/app_bar.dart';
 import 'package:movezy_driver_app/Screens/SupportChat/support_chat_service.dart';
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
+import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
 
 class FaqScreen extends StatefulWidget {
   const FaqScreen({super.key});
@@ -37,7 +39,12 @@ class _FaqScreenState extends State<FaqScreen> {
   // FAQ data per category
   static const Map<String, List<Map<String, String>>> _faqData = {
     'payment': [
-      {'q': 'When will I receive my payment?', 'a': 'Payments are processed every Monday. You will receive it in your linked bank account within 24-48 hours.'},
+      // Was: "Payments are processed every Monday … within 24-48 hours."
+      // There is no weekly payout run and no 24-48h guarantee anywhere in the
+      // system: earnings are frozen on each completed booking, the driver has
+      // to request a withdrawal, and an operator releases it from the admin
+      // payout queue. The answer now describes that actual flow.
+      {'q': 'When will I receive my payment?', 'a': 'Your earnings from a trip are added to your withdrawable balance as soon as the trip completes. Open My Wallet and tap Withdraw to request a payout to your registered bank account. Each request is reviewed and released by our payouts team, and you can follow its status in My Wallet.'},
       {'q': 'My payment amount seems incorrect', 'a': 'Check your trip details in History. If the fare doesn\'t match, raise a ticket with the Order ID and we will review it.'},
       {'q': 'How to add my bank account?', 'a': 'Go to Profile > Bank Details to add or update your bank account information.'},
     ],
@@ -52,7 +59,13 @@ class _FaqScreenState extends State<FaqScreen> {
     ],
     'accident': [
       {'q': 'What to do in case of accident?', 'a': 'First ensure safety. Call emergency services if needed. Then tap the Panic Button in the app to notify our support team immediately.'},
-      {'q': 'Will insurance cover damages?', 'a': 'Yes, all active trips are covered under our partner insurance. File a claim within 24 hours with photos and police report if applicable.'},
+      // A "Will insurance cover damages?" entry used to answer "Yes, all active
+      // trips are covered under our partner insurance. File a claim within 24
+      // hours…". No such driver cover or claims process exists: the only
+      // insurance in the platform is an optional add-on a CUSTOMER can buy on a
+      // booking to cover their goods. Rather than replace one invented answer
+      // with another, the question is removed — a driver asking this needs a
+      // real answer from support, which the ticket button below reaches.
     ],
     'account': [
       {'q': 'How to update my documents?', 'a': 'Go to Profile > My Documents to upload updated versions of your Aadhaar, PAN, DL, or RC.'},
@@ -76,19 +89,11 @@ class _FaqScreenState extends State<FaqScreen> {
     super.dispose();
   }
 
-  /// Open the phone dialer with the support helpline.
-  Future<void> _callSupport() async {
-    final Uri phoneUri = Uri(scheme: 'tel', path: ApiUrls.supportPhoneNumber);
-    if (await canLaunchUrl(phoneUri)) {
-      await launchUrl(phoneUri);
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('unable_to_place_call'.tr)),
-        );
-      }
-    }
-  }
+  // A _callSupport() helper used to live here and dialled
+  // ApiUrls.supportPhoneNumber, which was the placeholder +91 1234567890.
+  // There is no real helpline for the app to dial, so the "Call Us" control
+  // was removed instead of pointing drivers at a stranger's number. Raising a
+  // ticket (below) is the path that genuinely reaches Movezy support.
 
   /// Pick a screenshot from the gallery to attach to the ticket.
   Future<void> _pickScreenshot() async {
@@ -109,6 +114,53 @@ class _FaqScreenState extends State<FaqScreen> {
     }
   }
 
+  /// Mongo ObjectId — the only thing the ticket API's `bookingId` accepts.
+  static final RegExp _objectIdPattern = RegExp(r'^[a-fA-F0-9]{24}$');
+
+  /// Resolve what the driver typed in "Order ID" to a booking's ObjectId.
+  ///
+  /// The field's own hint asks for an order id, but what the driver sees
+  /// everywhere in the app (trip summary, booking details, reviews) is
+  /// `bookingNumber` — a short human code like MZ1233. The ticket endpoint runs
+  /// `new Types.ObjectId(bookingId)` on whatever it is given, so any typed
+  /// value threw a BSON cast error server-side and the whole submission came
+  /// back as a generic failure. Now the typed value is matched against the
+  /// driver's own bookings to find the real id; anything that can't be matched
+  /// is carried in the message text instead of being sent as an ObjectId.
+  Future<String?> _resolveBookingId(String typed) async {
+    if (typed.isEmpty) return null;
+    if (_objectIdPattern.hasMatch(typed)) return typed;
+
+    final needle = typed.replaceAll('#', '').trim().toLowerCase();
+    if (needle.isEmpty) return null;
+
+    try {
+      final response = await http.get(
+        Uri.parse('${ApiUrls.driverBookingHistoryUrl}?page=1&limit=100'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${Prefs.accessToken}',
+        },
+      ).timeout(const Duration(seconds: 20));
+
+      if (response.statusCode != 200) return null;
+      final body = jsonDecode(response.body);
+      final data = body['data'] ?? body;
+      final bookings = (data is Map ? data['bookings'] : null) ?? [];
+      for (final b in (bookings as List)) {
+        if (b is! Map) continue;
+        final number = (b['bookingNumber'] ?? '').toString().trim().toLowerCase();
+        if (number.isNotEmpty && number == needle) {
+          final id = (b['_id'] ?? '').toString();
+          return _objectIdPattern.hasMatch(id) ? id : null;
+        }
+      }
+    } catch (_) {
+      // Lookup is best-effort: a failure must not block the ticket.
+    }
+    return null;
+  }
+
   /// Submit the ticket to the real support backend.
   Future<void> _submitTicket() async {
     if (_ticketCategory == null) {
@@ -126,10 +178,15 @@ class _FaqScreenState extends State<FaqScreen> {
     }
 
     setState(() => _submitting = true);
-    // Fold the order id (and note about a screenshot) into the message body,
-    // since the ticket API accepts a text message + optional bookingId.
     final orderId = _orderIdController.text.trim();
+    final resolvedBookingId = await _resolveBookingId(orderId);
+
     final buffer = StringBuffer(desc);
+    // Always keep what the driver typed in the body — if it couldn't be matched
+    // to one of their bookings, this is the only way support sees it at all.
+    if (orderId.isNotEmpty && resolvedBookingId == null) {
+      buffer.write('\n\nOrder ID (as entered by driver): $orderId');
+    }
     if (_screenshot != null) {
       buffer.write('\n\n[Screenshot attached by driver]');
     }
@@ -138,7 +195,7 @@ class _FaqScreenState extends State<FaqScreen> {
       category: _ticketCategory!,
       subject: _ticketCategory!,
       message: buffer.toString(),
-      bookingId: orderId.isNotEmpty ? orderId : null,
+      bookingId: resolvedBookingId,
     );
 
     if (!mounted) return;
@@ -381,44 +438,30 @@ class _FaqScreenState extends State<FaqScreen> {
                 const SizedBox(height: 6),
                 Text('connect_support'.tr, style: const TextStyle(fontSize: 13, color: Colors.black54)),
                 const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () {
-                          setState(() {
-                            _showTicketForm = true;
-                            _ticketCategory = _selectedCategory == 'payment' ? 'Payment Issue'
-                                : _selectedCategory == 'app' ? 'App Problem'
-                                : _selectedCategory == 'accident' ? 'Emergency'
-                                : 'Other';
-                          });
-                        },
-                        icon: const Icon(Icons.chat_bubble_outline, size: 18),
-                        label: Text('raise_a_ticket'.tr, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.appColor,
-                          side: BorderSide(color: AppColors.appColor),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
+                // "Call Us" used to sit beside this and dialled the placeholder
+                // support number; with no real line to dial, raising a ticket
+                // is the only control here and takes the full width.
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _showTicketForm = true;
+                        _ticketCategory = _selectedCategory == 'payment' ? 'Payment Issue'
+                            : _selectedCategory == 'app' ? 'App Problem'
+                            : _selectedCategory == 'accident' ? 'Emergency'
+                            : 'Other';
+                      });
+                    },
+                    icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                    label: Text('raise_a_ticket'.tr, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.appColor,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: _callSupport,
-                        icon: const Icon(Icons.phone, size: 18),
-                        label: Text('call_us'.tr, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.appColor,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ],
             ),

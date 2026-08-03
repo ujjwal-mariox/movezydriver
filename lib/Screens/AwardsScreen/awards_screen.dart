@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:hexcolor/hexcolor.dart';
 import 'package:movezy_driver_app/CommonWidgets/app_bar.dart';
+import 'package:movezy_driver_app/Screens/AwardsScreen/incentive_history_screen.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/dashboard_api_service.dart';
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
 
@@ -100,8 +101,17 @@ class _AwardsScreenState extends State<AwardsScreen> {
                             child: const Icon(Icons.arrow_back_ios, color: Colors.white),
                           ),
                         ),
-                        Text('my_awards'.tr, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
-                        const Spacer(),
+                        // Expanded: bare Row child got unbounded width, so a long
+                        // translation of 'my_awards' could never ellipsize. Takes over
+                        // the trailing Spacer's job — the title is start-aligned either way.
+                        Expanded(
+                          child: Text(
+                            'my_awards'.tr,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -140,9 +150,16 @@ class _AwardsScreenState extends State<AwardsScreen> {
                                 children: [
                                   const Icon(Icons.star, size: 14, color: Colors.amber),
                                   const SizedBox(width: 4),
-                                  Text(
-                                    rating > 0 ? 'Rating: ${rating.toStringAsFixed(1)}' : 'No rating yet',
-                                    style: const TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.w500),
+                                  // Flexible: bare Row child got unbounded width, so next
+                                  // to the fixed 72px trophy this could not ellipsize at
+                                  // large text scale on narrow screens.
+                                  Flexible(
+                                    child: Text(
+                                      rating > 0 ? 'Rating: ${rating.toStringAsFixed(1)}' : 'No rating yet',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 13, color: Colors.black54, fontWeight: FontWeight.w500),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -239,7 +256,16 @@ class _AwardsScreenState extends State<AwardsScreen> {
                       children: [
                         Icon(Icons.account_balance_wallet, color: AppColors.appColor, size: 20),
                         const SizedBox(width: 8),
-                        Text('incentive_summary'.tr, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                        // Expanded: bare Row child got unbounded width, so a long
+                        // translation of 'incentive_summary' could never ellipsize.
+                        Expanded(
+                          child: Text(
+                            'incentive_summary'.tr,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 14),
@@ -247,6 +273,40 @@ class _AwardsScreenState extends State<AwardsScreen> {
                     _summaryRow('Incentives Unlocked', '₹$incentivesEarned'),
                     const Divider(height: 20),
                     _summaryRow('Total (Earnings + Bonus)', '₹${todayEarnings + incentivesEarned}', bold: true),
+                    const SizedBox(height: 8),
+                    // Drill-down into what makes up "Incentives Unlocked". The
+                    // aggregate above is a single number sourced from the
+                    // DriverIncentive ledger; this opens the itemised list of
+                    // every bonus actually awarded, which had no UI before.
+                    InkWell(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const IncentiveHistoryScreen(),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'view_incentive_history'.tr,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.appColor,
+                                ),
+                              ),
+                            ),
+                            Icon(Icons.arrow_forward_ios,
+                                size: 14, color: AppColors.appColor),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -324,7 +384,16 @@ class _AwardsScreenState extends State<AwardsScreen> {
               children: [
                 const Icon(Icons.check_circle, color: Colors.green, size: 14),
                 const SizedBox(width: 6),
-                Text(bonusText, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.green)),
+                // Expanded: bare Row child got unbounded width, so the server-driven
+                // reward string could never wrap or ellipsize.
+                Expanded(
+                  child: Text(
+                    bonusText,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.green),
+                  ),
+                ),
               ],
             ),
           ],
@@ -339,7 +408,17 @@ class _AwardsScreenState extends State<AwardsScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontSize: 14, fontWeight: bold ? FontWeight.w700 : FontWeight.w400)),
+          // Expanded: as a bare Row child the label got unbounded width, so a long
+          // label like 'Total (Earnings + Bonus)' could never ellipsize. The value
+          // stays non-flex so it keeps its intrinsic width on the right.
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 14, fontWeight: bold ? FontWeight.w700 : FontWeight.w400),
+            ),
+          ),
           Text(value, style: TextStyle(fontSize: 14, fontWeight: bold ? FontWeight.w700 : FontWeight.w500)),
         ],
       ),

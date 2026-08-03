@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/CommonWidgets/button_widget.dart';
-import 'package:movezy_driver_app/Screens/ChatScreen/chat_screen.dart';
+import 'package:movezy_driver_app/Screens/SupportChat/support_tickets_screen.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/technician_dashboard.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -84,7 +84,16 @@ class _VerificationScreenState extends State<VerificationScreen>
 
     return Scaffold(
       backgroundColor: const Color(0xFFF0F5FA),
-      body: Column(
+      // The fixed-height children below total ~1011px. On any shorter screen the
+      // Spacers collapse to zero and the Column overflows (the reported 96px on a
+      // ~914px device). IntrinsicHeight + minHeight keeps the Spacers working on
+      // tall screens while allowing scroll on short ones.
+      body: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: IntrinsicHeight(
+              child: Column(
         children: [
           // App bar
           Container(
@@ -222,17 +231,14 @@ class _VerificationScreenState extends State<VerificationScreen>
 
           const SizedBox(height: 12),
 
-          // Chat with Staff button (secondary)
+          // Chat with Staff button (secondary).
+          // Must open the support TICKET system, not ChatScreen: that is the
+          // driver<->customer booking chat and needs a real booking ObjectId.
+          // Passing 'support' threw on the server, so messages were never stored.
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 22),
             child: ButtonWidget(
-              onTap: () => pushTo(
-                context,
-                const ChatScreen(
-                  bookingId: 'support',
-                  customerName: 'Movezy Support',
-                ),
-              ),
+              onTap: () => pushTo(context, const SupportTicketsScreen()),
               borderRadius: BorderRadius.circular(12),
               text: 'chat_with_staff'.tr,
               backgroundColor: Colors.transparent,
@@ -252,7 +258,11 @@ class _VerificationScreenState extends State<VerificationScreen>
             height: 121,
             color: const Color(0xFFF5F5F5),
           ),
-        ],
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -11,8 +11,13 @@ import 'package:pinput/pinput.dart';
 
 class OtpScreen extends StatefulWidget {
   final String mobileNumber;
-   String token;
-   OtpScreen({super.key, required this.mobileNumber, required this.token});
+
+  /// Transaction id from the login call. Resending the OTP issues a NEW one,
+  /// which used to be written back onto the widget itself (a mutable field on
+  /// an @immutable Widget); the live value now lives in the State.
+  final String token;
+
+  const OtpScreen({super.key, required this.mobileNumber, required this.token});
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
@@ -23,6 +28,9 @@ class _OtpScreenState extends State<OtpScreen> {
   Timer? _timer;
   String pinValue = "";
   bool showLoader = false;
+
+  /// Live txnId — starts as the one login handed us, replaced by each resend.
+  late String _token = widget.token;
 
   @override
   void initState() {
@@ -178,7 +186,7 @@ class _OtpScreenState extends State<OtpScreen> {
                 InkWell(
                   onTap: () async {
                     var res = await OtpApiService().resendOtp(context, widget.mobileNumber);
-                    widget.token = res?.data?.txnId ?? "";
+                    _token = res?.data?.txnId ?? "";
                     setState(() {});
                   },
                   child: Center(
@@ -225,7 +233,7 @@ class _OtpScreenState extends State<OtpScreen> {
                       }
                       else
                       {
-                        await OtpApiService().otpVerifyApi(context : context,otp: pinValue.toString(), token: widget.token, mobileNumber: widget.mobileNumber);
+                        await OtpApiService().otpVerifyApi(context : context,otp: pinValue.toString(), token: _token, mobileNumber: widget.mobileNumber);
                       }
                     },
                   ),
@@ -272,7 +280,13 @@ class _OtpScreenState extends State<OtpScreen> {
                   ),
                 ),
 
-                SizedBox(height: 20,),
+                // This Column runs to the bottom of the Scaffold body, so a
+                // fixed 20pt tail left the terms line — and the Verify button
+                // on short screens — under the gesture bar. Add the real inset.
+                // viewPadding, not padding: padding.bottom collapses to 0 while
+                // the OTP keypad is open, so the reserved space vanished at the
+                // exact moment the driver reaches for Verify.
+                SizedBox(height: 20 + MediaQuery.of(context).viewPadding.bottom),
               ],
             ),
 

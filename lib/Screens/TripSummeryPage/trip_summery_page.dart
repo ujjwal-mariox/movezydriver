@@ -245,7 +245,13 @@ class _TripSummeryPageState extends State<TripSummeryPage> {
 
   Widget _buildFareDetails() {
     final fare = _booking?['finalFare'] ?? _booking?['fare'] ?? 0;
-    final baseFare = _booking?['baseFare'] ?? fare;
+    // The driver's real settlement, frozen server-side at completion
+    // (subtotal minus commission, pre-GST). This used to show baseFare — one
+    // fare COMPONENT — or even the customer's gross under "You earned", so
+    // every summary reported a wrong figure. Older bookings predate the
+    // field; for those show the fare labelled as what it is, not as earnings.
+    final driverEarnings = _booking?['driverEarnings'];
+    final hasEarnings = driverEarnings is num && driverEarnings > 0;
 
     return Container(
       margin: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
@@ -268,10 +274,10 @@ class _TripSummeryPageState extends State<TripSummeryPage> {
           Center(
             child: Column(
               children: [
-                Text('earned_from_trip'.tr,
+                Text(hasEarnings ? 'earned_from_trip'.tr : 'Trip fare',
                     style: const TextStyle(color: Colors.blue)),
                 const SizedBox(height: 4),
-                Text(_formatFare(baseFare),
+                Text(_formatFare(hasEarnings ? driverEarnings : fare),
                     style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,

@@ -38,7 +38,9 @@ class ResultScreen extends StatelessWidget {
             ),
           ),
           Positioned(
-            bottom: 16,
+            // Keep the design's 16pt gap and add the device's real bottom
+            // inset — at a flat 16 the Back button sits under the gesture bar.
+            bottom: 16 + MediaQuery.of(context).padding.bottom,
             left: 16,
             right: 16,
             child: ElevatedButton(

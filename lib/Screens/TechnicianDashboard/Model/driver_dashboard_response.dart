@@ -35,12 +35,14 @@ class DriverDashboardData {
   final DashboardWallet wallet;
   final DashboardStats stats;
   final DashboardBookings bookings;
+  final DashboardTraining training;
 
   DriverDashboardData({
     required this.driver,
     required this.wallet,
     required this.stats,
     required this.bookings,
+    required this.training,
   });
 
   factory DriverDashboardData.fromJson(Map<String, dynamic> json) {
@@ -57,6 +59,39 @@ class DriverDashboardData {
       bookings: DashboardBookings.fromJson(
         Map<String, dynamic>.from((json['bookings'] ?? {}) as Map),
       ),
+      training: DashboardTraining.fromJson(
+        json['training'] is Map
+            ? Map<String, dynamic>.from(json['training'] as Map)
+            : const {},
+      ),
+    );
+  }
+}
+
+/// Training-gate status. Absent on older servers, in which case it defaults to
+/// "not required, complete" — the gate simply never shows.
+class DashboardTraining {
+  final bool required;
+  final bool complete;
+  final int totalRequired;
+  final int completedRequired;
+
+  DashboardTraining({
+    required this.required,
+    required this.complete,
+    required this.totalRequired,
+    required this.completedRequired,
+  });
+
+  /// Only gate the driver when training is required AND unfinished.
+  bool get shouldGate => required && !complete;
+
+  factory DashboardTraining.fromJson(Map<String, dynamic> json) {
+    return DashboardTraining(
+      required: _toBool(json['required']),
+      complete: json.containsKey('complete') ? _toBool(json['complete']) : true,
+      totalRequired: _toInt(json['totalRequired']),
+      completedRequired: _toInt(json['completedRequired']),
     );
   }
 }
@@ -230,6 +265,10 @@ class DashboardBooking {
   final double distanceKm;
   final int durationMin;
   final double estimatedFare;
+  /// What this trip is worth to the DRIVER: subtotal minus commission, pre-GST.
+  /// estimatedFare is the customer's gross — labelling that "your earnings"
+  /// overstates it by roughly a quarter.
+  final double estimatedEarnings;
   final double baseFare;
   final double addonTotal;
   final String customerName;
@@ -238,9 +277,11 @@ class DashboardBooking {
   final String paymentMethod;
   final String goodsType;
   final String goodsDescription;
-  final String otp;
   final List<BookingAddon> addons;
   final BookingLoadingUnloading? loadingUnloading;
+
+  /// Intermediate drops in delivery order. Empty for plain A→B rides.
+  final List<BookingStop> stops;
 
   DashboardBooking({
     required this.id,
@@ -259,6 +300,7 @@ class DashboardBooking {
     required this.distanceKm,
     required this.durationMin,
     required this.estimatedFare,
+    required this.estimatedEarnings,
     required this.baseFare,
     required this.addonTotal,
     required this.customerName,
@@ -267,9 +309,9 @@ class DashboardBooking {
     required this.paymentMethod,
     required this.goodsType,
     required this.goodsDescription,
-    required this.otp,
     required this.addons,
     required this.loadingUnloading,
+    this.stops = const [],
   });
 
   factory DashboardBooking.fromJson(Map<String, dynamic> json) {
@@ -294,6 +336,7 @@ class DashboardBooking {
       distanceKm: _toDouble(json['distanceKm']),
       durationMin: _toInt(json['durationMin']),
       estimatedFare: _toDouble(json['estimatedFare']),
+      estimatedEarnings: _toDouble(json['estimatedEarnings']),
       baseFare: _toDouble(json['baseFare']),
       addonTotal: _toDouble(json['addonTotal']),
       customerName: json['customerName']?.toString() ?? '',
@@ -302,7 +345,9 @@ class DashboardBooking {
       paymentMethod: json['paymentMethod']?.toString() ?? 'CASH',
       goodsType: json['goodsType']?.toString() ?? '',
       goodsDescription: json['goodsDescription']?.toString() ?? '',
-      otp: json['otp']?.toString() ?? '',
+      // NOTE: the server deliberately never sends `otp` to drivers; the model
+      // used to carry an always-empty field for it, which read as if the app
+      // expected to receive the code.
       addons: _toList(json['addons'])
           .map((item) => BookingAddon.fromJson(item))
           .toList(),
@@ -311,6 +356,43 @@ class DashboardBooking {
               Map<String, dynamic>.from(json['loadingUnloading'] as Map),
             )
           : null,
+      stops: _toList(json['stops'])
+          .map((item) => BookingStop.fromJson(item))
+          .toList(),
+    );
+  }
+}
+
+/// One intermediate drop of a multi-stop ride.
+class BookingStop {
+  final String address;
+  final double lat;
+  final double lng;
+  final String contactName;
+  final String contactPhone;
+
+  /// Non-empty once the driver marked this stop delivered.
+  final String completedAt;
+
+  bool get isCompleted => completedAt.isNotEmpty && completedAt != 'null';
+
+  BookingStop({
+    required this.address,
+    required this.lat,
+    required this.lng,
+    required this.contactName,
+    required this.contactPhone,
+    required this.completedAt,
+  });
+
+  factory BookingStop.fromJson(Map<String, dynamic> json) {
+    return BookingStop(
+      address: json['address']?.toString() ?? '',
+      lat: _toDouble(json['lat']),
+      lng: _toDouble(json['lng']),
+      contactName: json['contactName']?.toString() ?? '',
+      contactPhone: json['contactPhone']?.toString() ?? '',
+      completedAt: json['completedAt']?.toString() ?? '',
     );
   }
 }

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/CommonWidgets/button_widget.dart';
 import 'package:movezy_driver_app/Screens/LanguageScreen/language_selection_screen.dart';
 import 'package:movezy_driver_app/Screens/LoginScreen/LoginApiService/login_api_service.dart';
@@ -21,6 +22,22 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _phoneController = TextEditingController();
   bool _isChecked = false;
   bool showLoader = false;
+
+  /// Call the support line. Same pattern as HelpSupportScreen/FaqScreen.
+  /// NOTE: ApiUrls.supportPhoneNumber is still the placeholder +911234567890 —
+  /// replace it with the real line before release.
+  Future<void> _callSupport() async {
+    final uri = Uri(scheme: 'tel', path: ApiUrls.supportPhoneNumber);
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else if (mounted) {
+        showCustomToast(context, 'Could not open the dialer');
+      }
+    } catch (_) {
+      if (mounted) showCustomToast(context, 'Could not open the dialer');
+    }
+  }
 
   static const Map<String, String> _langNames = {
     'hi': 'हिन्दी',
@@ -163,20 +180,27 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(width: 8),
                           // Help button
-                          Container(
-                            height: 35,
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.white, width: 0.3),
-                              borderRadius: BorderRadius.circular(100),
-                            ),
-                            child: Row(
-                              children: [
-                                SizedBox(width: 10),
-                                Image.asset("assets/headphones.png", color: Colors.white, width: 22, height: 22),
-                                SizedBox(width: 10),
-                                Text('help'.tr, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
-                                SizedBox(width: 10),
-                              ],
+                          // Was a bare Container with no onTap — it looked like
+                          // a button and did nothing. Pre-login the driver has
+                          // no account yet, so calling support is the only
+                          // help we can actually offer here.
+                          GestureDetector(
+                            onTap: _callSupport,
+                            child: Container(
+                              height: 35,
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.white, width: 0.3),
+                                borderRadius: BorderRadius.circular(100),
+                              ),
+                              child: Row(
+                                children: [
+                                  SizedBox(width: 10),
+                                  Image.asset("assets/headphones.png", color: Colors.white, width: 22, height: 22),
+                                  SizedBox(width: 10),
+                                  Text('help'.tr, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500)),
+                                  SizedBox(width: 10),
+                                ],
+                              ),
                             ),
                           ),
                         ],
@@ -192,6 +216,16 @@ class _LoginScreenState extends State<LoginScreen> {
                 right: 0,
                 child: Container(
                   height: MediaQuery.of(context).size.height * 0.58,
+                  // This card is flush with the bottom of the screen, so its
+                  // last rows (the terms line and the WhatsApp opt-in checkbox)
+                  // sat under the gesture bar / 3-button nav. The widget that
+                  // owns the bottom edge reserves the device's real inset once,
+                  // instead of trusting the trailing SizedBox(10).
+                  // viewPadding, not padding: padding.bottom drops to 0 while
+                  // the number keypad is open, which made the whole card jump
+                  // down over the gesture bar the moment the field was tapped.
+                  padding: EdgeInsets.only(
+                      bottom: MediaQuery.of(context).viewPadding.bottom),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.only(topLeft: Radius.circular(25), topRight: Radius.circular(25))

@@ -148,10 +148,66 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
     return '$min min';
   }
 
+  double _amount(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
   String _formatFare(dynamic fare) {
     if (fare == null) return '\u20B90';
-    final val = (fare is num) ? fare : num.tryParse(fare.toString()) ?? 0;
-    return '\u20B9${NumberFormat('#,##0').format(val)}';
+    final val = _amount(fare);
+    // Keep the paise when there are any. Driver earnings are the subtotal minus
+    // commission and rarely land on a whole rupee; rounding them up overstated
+    // what the trip actually paid.
+    final pattern = val == val.roundToDouble() ? '#,##0' : '#,##0.00';
+    return '\u20B9${NumberFormat(pattern).format(val)}';
+  }
+
+  /// Human label for the booking's real status.
+  ///
+  /// The history endpoint returns EVERY booking this driver ever touched \u2014
+  /// cancelled ones and the trip currently under way included \u2014 and the card
+  /// showed none of that, so a cancelled ride looked like a completed, paid one.
+  static const Map<String, String> _statusLabels = {
+    'DRAFT': 'Scheduled',
+    'SEARCHING': 'Searching',
+    'ASSIGNED': 'Assigned',
+    'DRIVER_ARRIVED': 'At pickup',
+    'PICKED': 'Picked up',
+    'IN_PROGRESS': 'In progress',
+    'COMPLETED': 'Completed',
+    'CANCELLED': 'Cancelled',
+  };
+
+  String _statusLabel(String status) {
+    if (status.isEmpty) return 'Unknown';
+    final known = _statusLabels[status];
+    if (known != null) return known;
+    final words = status.toLowerCase().replaceAll('_', ' ');
+    return words[0].toUpperCase() + words.substring(1);
+  }
+
+  Color _statusColor(String status) {
+    if (status == 'COMPLETED') return const Color(0xFF1F8B4C);
+    if (status == 'CANCELLED') return const Color(0xFFE02D3C);
+    if (status.isEmpty) return Colors.grey.shade600;
+    return AppColors.appColor; // still in flight
+  }
+
+  Widget _statusChip(String status) {
+    final color = _statusColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        _statusLabel(status),
+        style: TextStyle(
+            fontSize: 10.5, fontWeight: FontWeight.w700, color: color),
+      ),
+    );
   }
 
   String _formatTime(String? dateStr) {
@@ -191,11 +247,23 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
             ),
           ),
           Expanded(
+            // Pull-to-refresh, as the dashboard has: a trip completed while
+            // this page sat open otherwise never appeared without re-entering.
             child: _loading
                 ? Center(child: CircularProgressIndicator(color: AppColors.appColor))
-                : _bookings.isEmpty
-                    ? Center(child: Text('no_trip_history'.tr, style: const TextStyle(fontSize: 16, color: Colors.grey)))
-                    : _buildList(),
+                : RefreshIndicator(
+                    color: AppColors.appColor,
+                    onRefresh: _fetchHistory,
+                    child: _bookings.isEmpty
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              const SizedBox(height: 200),
+                              Center(child: Text('no_trip_history'.tr, style: const TextStyle(fontSize: 16, color: Colors.grey))),
+                            ],
+                          )
+                        : _buildList(),
+                  ),
           ),
         ],
       ),
@@ -211,10 +279,10 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
       for (int i = 0; i < entry.value.length; i++) {
         children.add(_buildTripCard(entry.value[i]));
         if (i < entry.value.length - 1) {
-          children.add(const SizedBox(height: 10));
+          children.add(const SizedBox(height: 12));
         }
       }
-      children.add(const SizedBox(height: 12));
+      children.add(const SizedBox(height: 22));
     }
 
     if (_loadingMore) {
@@ -226,14 +294,16 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
 
     return ListView(
       controller: _scrollController,
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      // Always scrollable so pull-to-refresh works on a short list too.
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       children: children,
     );
   }
 
   Widget _buildDateHeader(String text) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
       child: Row(
         children: [
           const Expanded(child: Divider(color: Color(0xFFE2E5EA), thickness: 1, endIndent: 8)),
@@ -247,6 +317,19 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
     );
   }
 
+  /// One "icon + value" pair of the card's meta line.
+  Widget _metaChip(IconData icon, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: Colors.grey.shade500),
+        const SizedBox(width: 3),
+        Text(label,
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+      ],
+    );
+  }
+
   Widget _buildTripCard(dynamic booking) {
     final pickupAddress = booking['pickup']?['address'] ?? '';
     final dropAddress = booking['drop']?['address'] ?? '';
@@ -255,6 +338,17 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
     final fare = booking['finalFare'] ?? booking['fare'] ?? 0;
     final createdAt = booking['createdAt'] ?? '';
     final bookingId = booking['_id'] ?? '';
+
+    final status = (booking['status'] ?? '').toString().toUpperCase();
+    final isCompleted = status == 'COMPLETED';
+    final isCancelled = status == 'CANCELLED';
+    // driverEarnings is the settlement frozen at completion (subtotal minus
+    // commission, pre-GST). finalFare is what the CUSTOMER paid — showing that
+    // as the driver's take overstates it by roughly a quarter. Older bookings
+    // completed before the field existed fall back to the fare, labelled as
+    // the fare rather than as earnings.
+    final earnings = _amount(booking['driverEarnings']);
+    final hasEarnings = isCompleted && earnings > 0;
 
     return InkWell(
       onTap: () {
@@ -320,49 +414,53 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
                     ),
-                    const SizedBox(height: 10),
-                    // Time & distance (smaller text)
-                    Row(
+                    const SizedBox(height: 12),
+                    // Time & distance (smaller text). Wrap, not Row: three
+                    // pairs plus a long duration overflowed the line on
+                    // narrower screens and clipped the last one.
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Icon(Icons.schedule, size: 13, color: Colors.grey.shade500),
-                        const SizedBox(width: 3),
-                        Text(
-                          _formatTime(createdAt),
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                        ),
-                        const SizedBox(width: 12),
-                        Icon(Icons.straighten, size: 13, color: Colors.grey.shade500),
-                        const SizedBox(width: 3),
-                        Text(
-                          _formatDistance(distanceKm),
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                        ),
-                        const SizedBox(width: 12),
-                        Icon(Icons.timer_outlined, size: 13, color: Colors.grey.shade500),
-                        const SizedBox(width: 3),
-                        Text(
-                          _formatDuration(durationMin),
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                        ),
+                        _metaChip(Icons.schedule, _formatTime(createdAt)),
+                        _metaChip(Icons.straighten, _formatDistance(distanceKm)),
+                        _metaChip(Icons.timer_outlined, _formatDuration(durationMin)),
                       ],
                     ),
                   ],
                 ),
               ),
 
-              // Right: BIG earning amount
+              const SizedBox(width: 12),
+
+              // Right: real status, then the amount — but only where there IS
+              // one. A cancelled trip earned nothing, so it carries no figure
+              // at all instead of the customer's fare in "earnings" colours.
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  const SizedBox(height: 10),
-                  Text(
-                    _formatFare(fare),
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.appColor,
+                  _statusChip(status),
+                  if (!isCancelled) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _formatFare(hasEarnings ? earnings : fare),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        // Only a completed trip's money is the driver's.
+                        color: isCompleted
+                            ? AppColors.appColor
+                            : Colors.grey.shade600,
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 2),
+                    Text(
+                      hasEarnings ? 'You earned' : 'Trip fare',
+                      style:
+                          TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                    ),
+                  ],
                 ],
               ),
             ],

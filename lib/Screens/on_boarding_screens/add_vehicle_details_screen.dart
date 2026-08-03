@@ -37,15 +37,27 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
   String? rcBackImage;
   String? selectedCity;
   String? vehicleType;
+  // The admin catalog id for the selected type — this is what dispatch matches
+  // on, so it must be submitted with the RC rather than the display name.
+  String? vehicleTypeId;
   String? oilType;
   String? bodyType;
 
   // Master data lists fetched from backend
   List<String> cityList = [];
-  List<String> vehicleTypeList = ['2 Wheeler', '3 Wheeler', '4 Wheeler'];
+  // Vehicle types are admin-managed; each entry is {id, name}. Empty until the
+  // catalog loads — no hardcoded 2/3/4-Wheeler fallback, since a stale list
+  // wouldn't map to a real vehicleTypeId.
+  List<Map<String, String>> vehicleTypeList = [];
   List<String> bodyTypeList = ['Open', 'Closed'];
   List<String> fuelTypeList = [];
   bool isLoadingMasterData = true;
+
+  // In-flight guard for Save & Continue. Without it a second tap posted a
+  // second RC before the first response landed, registering the same vehicle
+  // twice — and every vehicle carries its own ₹999 joining fee, so the driver
+  // was billed twice. Set before the first await, cleared in a finally.
+  bool _savingVehicle = false;
 
   @override
   void initState() {
@@ -73,6 +85,15 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
           fuelTypeList = (data['fuelTypes'] as List)
               .map<String>((f) => f['name'].toString())
               .toList();
+          // Admin-managed vehicle catalog. Keep id alongside name so submit can
+          // send the vehicleTypeId dispatch needs.
+          vehicleTypeList = ((data['vehicleTypes'] as List?) ?? [])
+              .map<Map<String, String>>((v) => {
+                    'id': (v['_id'] ?? v['id'] ?? '').toString(),
+                    'name': (v['name'] ?? '').toString(),
+                  })
+              .where((v) => v['id']!.isNotEmpty && v['name']!.isNotEmpty)
+              .toList();
           isLoadingMasterData = false;
         });
       } else {
@@ -85,6 +106,62 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
       setState(() {
         isLoadingMasterData = false;
       });
+    }
+  }
+
+  Future<void> _onSaveAndContinue() async {
+    // Validation runs before the guard: a rejected tap must leave the button
+    // usable so the driver can fix the field and try again.
+    if (vehicleNumberController.text.trim().isEmpty) {
+      showCustomToast(context, 'please_enter_vehicle_number'.tr);
+      return;
+    }
+    if (rcFrontImage == null) {
+      showCustomToast(context, 'please_add_vehicle_rc'.tr);
+      return;
+    }
+    if (rcBackImage == null) {
+      showCustomToast(context, 'Please add RC back side');
+      return;
+    }
+    if (selectedCity == null) {
+      showCustomToast(context, 'please_select_city'.tr);
+      return;
+    }
+    if (vehicleType == null) {
+      showCustomToast(context, 'please_add_vehicle_type'.tr);
+      return;
+    }
+    if (bodyType == null) {
+      showCustomToast(context, 'please_add_body_type'.tr);
+      return;
+    }
+    if (oilType == null) {
+      showCustomToast(context, 'please_add_fuel_type'.tr);
+      return;
+    }
+
+    // Belt and braces: onTap is already nulled while this is true, but a tap
+    // queued in the same frame as the first would still get through.
+    if (_savingVehicle) return;
+    setState(() => _savingVehicle = true);
+
+    try {
+      await OnBoardingApiService().addRcDetailsApi(
+        vehicleNumber: vehicleNumberController.text.trim(),
+        rcFrontImage: File(rcFrontImage!),
+        rcBackImage: File(rcBackImage!),
+        cityName: selectedCity.toString(),
+        context: context,
+        bodyType: bodyType.toString(),
+        vehicleType: vehicleType.toString(),
+        vehicleTypeId: vehicleTypeId ?? '',
+        oilType: oilType.toString(),
+        isOnboarding: widget.isOnboarding,
+      );
+    } finally {
+      // The service navigates away on success, so this widget may be gone.
+      if (mounted) setState(() => _savingVehicle = false);
     }
   }
 
@@ -103,7 +180,14 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
 
     return Scaffold(
       backgroundColor: HexColor("#F0F5FF"),
-      bottomNavigationBar: Container(
+      // top: false — the bar owns only the bottom edge. Without this the 90pt
+      // box ends at the screen edge and the gesture bar / nav buttons sit on
+      // top of "Save & Continue", making it untappable. SafeArea reads the real
+      // device inset (and correctly reports 0 while the keyboard is up, so the
+      // button still rides directly above the keyboard on this form).
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
         height: 90,
         decoration: BoxDecoration(color: Colors.grey[100]),
         child: Column(
@@ -114,60 +198,19 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18),
               child: ButtonWidget(
-                onTap: ()
-                {
-                  // var params = {
-                  //   "fullName": driverNameController.text.toString(),
-                  //   "email": driverEmailController.text.toString(),
-                  //   "dob": driverDateController.text.toString(),
-                  //   "gender": selectedGender.toString(),
-                  //   "bloodGroup": bloodGroups.toString(),
-                  //   "city": "Delhi",
-                  //   "state": "NCR"
-                  // };
-
-
-                  if(vehicleNumberController.text.toString() == "")
-                  {
-                    showCustomToast(context, 'please_enter_vehicle_number'.tr);
-                  }
-                  else if(rcFrontImage == null)
-                  {
-                    showCustomToast(context, 'please_add_vehicle_rc'.tr);
-                  }
-                  else if(rcBackImage == null)
-                  {
-                    showCustomToast(context, 'Please add RC back side');
-                  }
-                  else if(selectedCity == null)
-                  {
-                    showCustomToast(context, 'please_select_city'.tr);
-                  }
-                  else if(vehicleType == null)
-                  {
-                    showCustomToast(context, 'please_add_vehicle_type'.tr);
-                  }
-                  else if(bodyType == null)
-                  {
-                    showCustomToast(context, 'please_add_body_type'.tr);
-                  }
-                  else if(oilType == null)
-                  {
-                    showCustomToast(context, 'please_add_fuel_type'.tr);
-                  }
-                  else
-                  {
-                    OnBoardingApiService().addRcDetailsApi(vehicleNumber: vehicleNumberController.text.toString(), rcFrontImage: File(rcFrontImage!), rcBackImage: File(rcBackImage!), cityName: selectedCity.toString(), context: context, bodyType: bodyType.toString(), vehicleType: vehicleType.toString(), oilType: oilType.toString(), isOnboarding: widget.isOnboarding);
-                  }
-                },
+                // Null while a submit is in flight so the tap is a no-op.
+                onTap: _savingVehicle ? null : _onSaveAndContinue,
                 borderRadius: BorderRadius.circular(12),
-                text: 'save_continue'.tr,
-                backgroundColor: AppColors.appColor,
+                text: _savingVehicle ? 'loading'.tr : 'save_continue'.tr,
+                backgroundColor: _savingVehicle
+                    ? AppColors.appColor.withValues(alpha: 0.5)
+                    : AppColors.appColor,
               ),
             ),
 
             SizedBox(height: 16,),
           ],
+        ),
         ),
       ),
       body: isLoadingMasterData
@@ -302,8 +345,22 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                             if (extracted['vehicleNumber'] != null && extracted['vehicleNumber']!.isNotEmpty) {
                               vehicleNumberController.text = extracted['vehicleNumber']!;
                             }
-                            if (extracted['vehicleType'] != null && vehicleType == null) {
-                              vehicleType = extracted['vehicleType'];
+                            // Map the OCR'd type onto a real catalog entry so it
+                            // carries a vehicleTypeId; ignore it if no match.
+                            final extractedType =
+                                extracted['vehicleType']?.toLowerCase().trim();
+                            if (extractedType != null &&
+                                extractedType.isNotEmpty &&
+                                vehicleTypeId == null) {
+                              final match = vehicleTypeList.firstWhere(
+                                (v) =>
+                                    v['name']!.toLowerCase() == extractedType,
+                                orElse: () => {'id': '', 'name': ''},
+                              );
+                              if (match['id']!.isNotEmpty) {
+                                vehicleTypeId = match['id'];
+                                vehicleType = match['name'];
+                              }
                             }
                           }
                         }
@@ -439,18 +496,23 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                           contentPadding: EdgeInsets.zero,
                         ),
                         hint: Text('choose_one'.tr,style: TextStyle(fontSize: 13, color: HexColor("#607080")),),
-                        initialValue: vehicleType,
+                        initialValue: vehicleTypeId,
                         items: vehicleTypeList
                             .map(
                               (item) => DropdownMenuItem(
-                            value: item,
-                            child: Text(item, style: TextStyle(fontSize: 13, color: HexColor("#607080")),),
+                            value: item['id'],
+                            child: Text(item['name']!, style: TextStyle(fontSize: 13, color: HexColor("#607080")),),
                           ),
                         )
                             .toList(),
                         onChanged: (value) {
                           setState(() {
-                            vehicleType = value;
+                            vehicleTypeId = value;
+                            // Keep the name too — the KYC RC record still stores
+                            // the coarse type string (vehicalId).
+                            vehicleType = vehicleTypeList
+                                .firstWhere((v) => v['id'] == value,
+                                    orElse: () => {'name': ''})['name'];
                           });
                         },
                         validator: (value) =>

@@ -35,8 +35,19 @@ class _BankDetailsScreenState extends State<BankDetailsScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      bottomNavigationBar: Container(
-        height: 82,
+      // top: false — the bar owns only the bottom edge. Without this the 90pt
+      // box ends at the screen edge and the gesture bar / nav buttons sit on
+      // top of "Save & Continue", making it untappable. SafeArea reads the real
+      // device inset (and correctly reports 0 while the keyboard is up, so the
+      // button still rides directly above the keyboard on this form).
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+        // 90, matching the three sibling onboarding screens. At 82 this box was
+        // 4px shorter than its children (15 + ButtonWidget's default 56 + 15 =
+        // 86), so it overflowed on every device on every render — no narrow
+        // screen or text scale needed.
+        height: 90,
         decoration: BoxDecoration(color: Colors.grey[100]),
         child: Column(
           children: [
@@ -67,6 +78,7 @@ class _BankDetailsScreenState extends State<BankDetailsScreen> {
 
             SizedBox(height: 15,),
           ],
+        ),
         ),
       ),
       body: SingleChildScrollView(

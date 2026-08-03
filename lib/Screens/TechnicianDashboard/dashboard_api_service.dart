@@ -65,6 +65,27 @@ class DashboardApiService {
     }
   }
 
+  /// Cancel an assigned booking (pre-pickup only). The backend releases this
+  /// driver and re-dispatches the booking to others.
+  Future<Map<String, dynamic>?> cancelBooking(
+    String bookingId, {
+    String? reason,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse(ApiUrls.driverCancelBookingUrl(bookingId)),
+        headers: _headers,
+        body: json.encode({if (reason != null) 'reason': reason}),
+      ).timeout(const Duration(seconds: 30));
+
+      final data = json.decode(response.body);
+      if (data is Map<String, dynamic>) return data;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>?> arrivedAtPickup(String bookingId) async {
     try {
       final response = await http.post(
@@ -113,11 +134,15 @@ class DashboardApiService {
   }
 
   /// Complete the trip. Backend marks COMPLETED and credits the customer's coins.
-  Future<Map<String, dynamic>?> completeTrip(String bookingId) async {
+  Future<Map<String, dynamic>?> completeTrip(String bookingId,
+      {String? deliveryOtp}) async {
     try {
       final response = await http.post(
         Uri.parse(ApiUrls.driverCompleteTripUrl(bookingId)),
         headers: _headers,
+        // The delivery OTP the receiver read out; server enforces it only when
+        // the booking carries one.
+        body: deliveryOtp == null ? null : json.encode({'otp': deliveryOtp}),
       ).timeout(const Duration(seconds: 30));
       final data = json.decode(response.body);
       if (data is Map<String, dynamic>) return data;
@@ -275,6 +300,57 @@ class DashboardApiService {
         if (inner is Map<String, dynamic>) return inner;
       }
       return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Mark one intermediate stop of a multi-drop ride delivered. Returns the
+  /// whole envelope so the caller can distinguish success (code 1) from a
+  /// server refusal (wrong order, already done) and show the real message.
+  Future<Map<String, dynamic>?> completeStop(
+      String bookingId, int stopIndex) async {
+    try {
+      final response = await http.post(
+        Uri.parse(
+            '${ApiUrls.driverBookingDetailsUrl}/$bookingId/stops/$stopIndex/complete'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 30));
+      final data = json.decode(response.body);
+      if (data is Map<String, dynamic>) return data;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The bonuses actually awarded to this driver (the ledger behind the
+  /// "Incentives Unlocked" aggregate on the Awards screen), newest first.
+  ///
+  /// Returns null ONLY on failure (network/auth/parse) so the caller can tell a
+  /// real error from a legitimately empty history — the other methods here
+  /// collapse both to null, which the Awards screen can't distinguish. The
+  /// backend keys each row `_id` (not `id`), so read that.
+  Future<({List<Map<String, dynamic>> items, num total})?>
+      fetchIncentiveHistory() async {
+    try {
+      final response = await http.get(
+        Uri.parse(ApiUrls.driverIncentiveHistoryUrl),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 30));
+      if (response.statusCode != 200) return null;
+      final data = json.decode(response.body);
+      if (data is! Map<String, dynamic>) return null;
+      final inner = data['data'];
+      if (inner is! Map<String, dynamic>) return null;
+      final rawItems = inner['items'];
+      final items = <Map<String, dynamic>>[
+        if (rawItems is List)
+          for (final it in rawItems)
+            if (it is Map<String, dynamic>) it,
+      ];
+      final total = inner['total'] is num ? inner['total'] as num : 0;
+      return (items: items, total: total);
     } catch (_) {
       return null;
     }

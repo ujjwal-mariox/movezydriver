@@ -81,75 +81,100 @@ class OnBoardingApiService {
     }
   }
 
-  void addRcDetailsApi({required String vehicleNumber, required File? rcFrontImage, required File? rcBackImage, required BuildContext context, required String cityName, required String vehicleType, required String bodyType, required String oilType, bool isOnboarding = true,}) async {
+  /// Registers a vehicle from its RC.
+  ///
+  /// Returns a Future so the caller can await it: this used to be a bare
+  /// `void ... async`, which made the call fire-and-forget. The Save & Continue
+  /// button had no way to know a submit was in flight, so a second tap posted a
+  /// second RC and created a second vehicle — each of which carries its own
+  /// ₹999 joining fee. The screen now awaits this and blocks the button.
+  Future<void> addRcDetailsApi({required String vehicleNumber, required File? rcFrontImage, required File? rcBackImage, required BuildContext context, required String cityName, required String vehicleType, String vehicleTypeId = '', required String bodyType, required String oilType, bool isOnboarding = true,}) async {
+    try {
+      var request = http.MultipartRequest('POST', Uri.parse(ApiUrls.addRcDetailsApi));
 
-    var request = http.MultipartRequest('POST', Uri.parse(ApiUrls.addRcDetailsApi));
+      request.fields.addAll({
+        "vehicleNumber": vehicleNumber,
+        "city": cityName,
+        "vehicalId": vehicleType,
+        // Admin-catalog id — backend ties the DriverVehicle to it so dispatch can
+        // match this driver to bookings of this vehicle type.
+        if (vehicleTypeId.isNotEmpty) "vehicleTypeId": vehicleTypeId,
+        "bodyType": bodyType,
+        "fuelType": oilType,
+      });
 
-    request.fields.addAll({
-      "vehicleNumber": vehicleNumber,
-      "city": cityName,
-      "vehicalId": vehicleType,
-      "bodyType": bodyType,
-      "fuelType": oilType,
-    });
+      if (rcFrontImage != null) {
+        request.files.add(await http.MultipartFile.fromPath(
+          'rcFrontImage',
+          rcFrontImage.path,
+          contentType: MediaType('image', 'jpeg'),
+        ));
+      }
 
-    if (rcFrontImage != null) {
-      request.files.add(await http.MultipartFile.fromPath(
-        'rcFrontImage',
-        rcFrontImage.path,
-        contentType: MediaType('image', 'jpeg'),
-      ));
-    }
+      if (rcBackImage != null) {
+        request.files.add(await http.MultipartFile.fromPath(
+          'rcBackImage',
+          rcBackImage.path,
+          contentType: MediaType('image', 'jpeg'),
+        ));
+      }
 
-    if (rcBackImage != null) {
-      request.files.add(await http.MultipartFile.fromPath(
-        'rcBackImage',
-        rcBackImage.path,
-        contentType: MediaType('image', 'jpeg'),
-      ));
-    }
+      // Add headers
+      request.headers.addAll({
+        'Authorization': 'Bearer ${Prefs.accessToken}',
+        'Content-Type': 'multipart/form-data',
+      });
 
-    // Add headers
-    request.headers.addAll({
-      'Authorization': 'Bearer ${Prefs.accessToken}',
-      'Content-Type': 'multipart/form-data',
-    });
+      // Send request
+      var response = await request.send();
 
-    // Send request
-    var response = await request.send();
+      debugPrint("Add Rc details ${response.request?.url}");
 
-    print("Add Rc details ${response.request?.url}");
+      final body = await response.stream.bytesToString();
+      Map<String, dynamic> dataT = {};
+      try {
+        dataT = body.isNotEmpty ? json.decode(body) as Map<String, dynamic> : {};
+      } catch (_) {
+        // Non-JSON body (gateway HTML, empty 502…) — don't let it throw past
+        // the caller's in-flight guard.
+      }
+      debugPrint("Decoded JSON Response: $dataT");
 
-    var dataT = json.decode(await response.stream.bytesToString());
-    print("Decoded JSON Response: $dataT");
-
-    if(response.statusCode == 200)
-    {
-      if (!isOnboarding) {
-        // Already-onboarded driver adding an extra vehicle from "My Vehicles".
-        // Never route back into the onboarding license step — just return to
-        // the vehicles list (the caller refreshes it on pop).
-        if (context.mounted) {
-          showCustomToast(context, dataT['message']?.toString() ?? 'Vehicle added successfully');
-          Navigator.pop(context);
+      if (response.statusCode == 200) {
+        if (!isOnboarding) {
+          // Already-onboarded driver adding an extra vehicle from "My Vehicles".
+          // Never route back into the onboarding license step — just return to
+          // the vehicles list (the caller refreshes it on pop).
+          if (context.mounted) {
+            showCustomToast(context, dataT['message']?.toString() ?? 'Vehicle added successfully');
+            Navigator.pop(context);
+          }
+          return;
         }
-        return;
-      }
 
-      final bool hasLicense = dataT['data']?['hasLicense'] == true;
-      if (hasLicense) {
-        // Driver already submitted license — skip to payment screen
-        await Prefs.setString('onboarding_step', 'my_vehicles');
-        replaceRoute(context, const MyVehiclesScreen());
+        final bool hasLicense = dataT['data']?['hasLicense'] == true;
+        if (hasLicense) {
+          // Driver already submitted license — skip to payment screen
+          await Prefs.setString('onboarding_step', 'my_vehicles');
+          if (context.mounted) replaceRoute(context, const MyVehiclesScreen());
+        } else {
+          // First vehicle — need driver details + license
+          await Prefs.setString('onboarding_step', 'driver_details');
+          if (context.mounted) pushTo(context, DriverDetailsScreen());
+        }
       } else {
-        // First vehicle — need driver details + license
-        await Prefs.setString('onboarding_step', 'driver_details');
-        pushTo(context, DriverDetailsScreen());
+        if (context.mounted) {
+          showCustomToast(context, dataT['message']?.toString() ?? "Something went wrong");
+        }
       }
-    }
-    else
-    {
-      showCustomToast(context, dataT['message']?.toString() ?? "Something went wrong");
+    } catch (e) {
+      // The upload used to be able to throw straight out of a fire-and-forget
+      // async void. Now that the screen awaits it, a failure has to surface as
+      // a message and let the caller re-enable its button.
+      debugPrint('Add RC details error: $e');
+      if (context.mounted) {
+        showCustomToast(context, 'network_error'.tr);
+      }
     }
   }
 
@@ -196,13 +221,27 @@ class OnBoardingApiService {
         'Authorization': 'Bearer ${Prefs.accessToken}',
       });
 
+      // Only send what was actually collected.
+      //
+      // This used to fall back to licenseNumber "DL-PENDING" and expiryDate
+      // "2099-12-31" whenever the caller didn't supply them — which is always,
+      // because the licence step only captures a photo. Those two invented
+      // values were written to the driver's KYC record and then read back as
+      // fact: the profile printed "DL-PENDING" as the licence number and an
+      // expiry 74 years out, and an admin reviewing the document saw the same.
+      // Omitted instead: the backend stores drivingLicense.number /
+      // .expiryDate as optional strings and the express-validator notEmpty()
+      // checks on them are never enforced (the route's final middleware only
+      // inspects req.files, it never calls validationResult), so leaving them
+      // out saves the images exactly as before. The profile screen already
+      // degrades honestly — it hides the DL Number row when the number is
+      // empty and renders "-" for an unparseable/absent expiry date.
+      final String licenseNumber =
+          (params["licenseNumber"] ?? "").toString().trim();
+      final String expiryDate = (params["expiryDate"] ?? "").toString().trim();
       request.fields.addAll({
-        "licenseNumber": (params["licenseNumber"] ?? "").toString().trim().isNotEmpty
-            ? params["licenseNumber"].toString().trim()
-            : "DL-PENDING",
-        "expiryDate": (params["expiryDate"] ?? "").toString().trim().isNotEmpty
-            ? params["expiryDate"].toString().trim()
-            : "2099-12-31",
+        if (licenseNumber.isNotEmpty) "licenseNumber": licenseNumber,
+        if (expiryDate.isNotEmpty) "expiryDate": expiryDate,
       });
 
       request.files.add(await http.MultipartFile.fromPath(

@@ -29,6 +29,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   late ChatService _chatService;
   final _messageController = TextEditingController();
+  final _messageFocus = FocusNode();
   final _scrollController = ScrollController();
   final _imagePicker = ImagePicker();
   bool _isSendingImage = false;
@@ -67,6 +68,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _chatService.messages.removeListener(_onNewMessage);
     _chatService.dispose();
     _messageController.dispose();
+    _messageFocus.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -249,11 +251,20 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Row(
           children: [
             const SizedBox(width: 5),
-            const Icon(Icons.emoji_emotions_outlined),
+            // Was a bare Icon with no handler — a control that looked tappable
+            // and did nothing. There is no emoji-picker package here, so it now
+            // focuses the field to bring up the keyboard (where emoji live).
+            IconButton(
+              icon: const Icon(Icons.emoji_emotions_outlined, color: Colors.grey),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              onPressed: () => _messageFocus.requestFocus(),
+            ),
             const SizedBox(width: 9),
             Expanded(
               child: TextField(
                 controller: _messageController,
+                focusNode: _messageFocus,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => _sendMessage(),
                 decoration: InputDecoration(
@@ -319,7 +330,11 @@ class _ChatBubble extends StatelessWidget {
               color: isMe ? AppColors.appColor : const Color(0xFFF6F6F6),
               borderRadius: BorderRadius.circular(10),
             ),
-            constraints: const BoxConstraints(maxWidth: 300),
+            // Relative to screen width so a long message can't crowd the edge
+            // on a narrow (320dp) phone, where a fixed 300px bubble left almost
+            // no margin.
+            constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.75),
             child: Text(
               text,
               style: TextStyle(

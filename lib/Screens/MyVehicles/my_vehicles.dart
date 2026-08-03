@@ -14,7 +14,13 @@ import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 class MyVehiclesScreen extends StatefulWidget {
-  const MyVehiclesScreen({super.key});
+  /// False when an already-onboarded driver opens this from their profile to
+  /// add another vehicle. Onboarding routes to VerificationScreen after payment;
+  /// an onboarded driver must stay here, since that screen has no way back.
+  /// Mirrors the same flag on AddVehicleDetailsScreen.
+  final bool isOnboarding;
+
+  const MyVehiclesScreen({super.key, this.isOnboarding = true});
 
   @override
   State<MyVehiclesScreen> createState() => _MyVehiclesScreenState();
@@ -166,8 +172,10 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
       // Refresh list
       await _fetchVehicles();
 
-      // If all vehicles paid, go to verification
-      if (_allVehiclesPaid && mounted) {
+      // If all vehicles paid, go to verification — but only during onboarding.
+      // An onboarded driver stays on this list, where the new vehicle shows its
+      // own per-vehicle verification badge.
+      if (widget.isOnboarding && _allVehiclesPaid && mounted) {
         replaceRoute(context, VerificationScreen());
       }
     } catch (e) {
@@ -411,6 +419,41 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
     );
   }
 
+  /// Human wording for a verificationStatus enum.
+  String _verificationLabel(String status) {
+    switch (status) {
+      case 'approved':
+        return 'Verified';
+      case 'rejected':
+        return 'Rejected';
+      case 'under_verification':
+        return 'Under Verification';
+      default:
+        return 'Pending';
+    }
+  }
+
+  Color _verificationColor(String status) {
+    switch (status) {
+      case 'approved':
+        return HexColor('#35B255');
+      case 'rejected':
+        return HexColor('#EE3E35');
+      default:
+        return HexColor('#E8A33D');
+    }
+  }
+
+  /// "Name, Phone" — but only the parts that exist, and empty when neither
+  /// does, so the card never shows a stray comma.
+  String _assignedDriverLine(VehicleItem vehicle) {
+    final parts = [
+      (vehicle.assignedDriverName ?? '').trim(),
+      (vehicle.assignedDriverPhone ?? '').trim(),
+    ].where((p) => p.isNotEmpty);
+    return parts.join(', ');
+  }
+
   Widget _buildVehicleCard(VehicleItem vehicle) {
     final isPaid = vehicle.onboardingFeePaid == true;
     final hasDiscount = (vehicle.referralDiscount ?? 0) > 0;
@@ -444,21 +487,30 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
                 ),
               ),
               if (isPaid)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: HexColor('#35B255').withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    vehicle.verificationStatus ?? 'pending',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: HexColor('#35B255'),
+                Builder(builder: (_) {
+                  // This printed the raw database enum ("under_verification")
+                  // in green no matter what it said — so a rejected vehicle
+                  // looked approved, and the label read like a bug.
+                  final status = (vehicle.verificationStatus ?? 'pending').toLowerCase();
+                  final label = _verificationLabel(status);
+                  final color = _verificationColor(status);
+                  return Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(4),
                     ),
-                  ),
-                ),
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: color,
+                      ),
+                    ),
+                  );
+                }),
               if (hasDiscount && !isPaid)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -477,31 +529,25 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
                 ),
             ],
           ),
-          const SizedBox(height: 3),
+          // Driver name + phone.
+          // Interpolating both unconditionally printed a bare ", " on every
+          // card where no driver is assigned — which is most of them, since
+          // assignedDriverName/Phone are optional at onboarding.
+          if (_assignedDriverLine(vehicle).isNotEmpty) ...[
+            const SizedBox(height: 3),
+            Text(
+              _assignedDriverLine(vehicle),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 3),
+          ],
 
-          // Driver name + phone
-          Text(
-            '${vehicle.assignedDriverName ?? ''}, ${vehicle.assignedDriverPhone ?? ''}',
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-          ),
-          const SizedBox(height: 3),
-
-          // Monthly earnings
-          Row(
-            children: [
-              SizedBox(
-                height: 20,
-                child: Image.asset("assets/money_icon.png"),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'monthly_earnings'.tr,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          ),
+          // The "Upto Rs.25000 monthly earnings" line was removed. It was a
+          // fixed marketing string printed next to a money icon on each
+          // specific vehicle card, so it read as that vehicle's actual
+          // earnings. Nothing measures it: bookings do not record which
+          // vehicle ran the trip (booking.vehicleNumber is never populated),
+          // so real per-vehicle earnings cannot be shown yet.
         ],
       ),
     );
