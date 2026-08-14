@@ -1,15 +1,42 @@
 import 'dart:convert';
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/CommonWidgets/app_bar.dart';
+import 'package:movezy_driver_app/Screens/MyWallet/Widgets/wallet_transaction_list.dart';
 import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
-import 'package:intl/intl.dart';
+
+/// Filter values shared with callers so the wallet's Send/Received tiles don't
+/// have to hardcode the magic ints this screen's chips use.
+class TransactionFilter {
+  static const int all = 0;
+  static const int credit = 1;
+  static const int debit = 2;
+}
 
 class TransactionsScreen extends StatefulWidget {
-  const TransactionsScreen({super.key});
+  /// Which chip is active on open — one of [TransactionFilter]. The wallet's
+  /// "Send Amount" / "Received Amount" tiles open this same screen pre-filtered
+  /// to DEBIT / CREDIT instead of there being three near-identical screens.
+  final int initialFilter;
+
+  /// App-bar title override, so a pre-filtered entry point can name what it is
+  /// showing ("Send Amount") rather than the generic "Transactions".
+  final String? title;
+
+  /// Hidden on the pre-filtered entry points: the title there already names the
+  /// filter, so leaving the chips tappable would let the header contradict the
+  /// list. The unfiltered "Wallet Statement" entry keeps them.
+  final bool showFilters;
+
+  const TransactionsScreen({
+    super.key,
+    this.initialFilter = TransactionFilter.all,
+    this.title,
+    this.showFilters = true,
+  });
 
   @override
   State<TransactionsScreen> createState() => _TransactionsScreenState();
@@ -24,7 +51,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   final ScrollController _scrollController = ScrollController();
 
   // Filter: 0 = All, 1 = Credit, 2 = Debit
-  int _filterIndex = 0;
+  late int _filterIndex = widget.initialFilter;
 
   @override
   void initState() {
@@ -55,6 +82,9 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           'Authorization': 'Bearer ${Prefs.accessToken}',
         },
       );
+      // mounted guards: these setStates sit after an await, and the drain loop
+      // below can still have a request in flight when the driver backs out.
+      if (!mounted) return;
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
         final data = body['data'] ?? body;
@@ -65,16 +95,19 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           _page = 1;
           _loading = false;
         });
+        await _drainPagesForEmptyFilter();
       } else {
         setState(() => _loading = false);
       }
     } catch (e) {
       debugPrint('Error fetching transactions: $e');
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _loadMore() async {
+  /// Returns whether the page actually advanced, so the drain loop below can
+  /// stop instead of retrying a failing request forever.
+  Future<bool> _loadMore() async {
     setState(() => _loadingMore = true);
     try {
       final nextPage = _page + 1;
@@ -86,6 +119,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           'Authorization': 'Bearer ${Prefs.accessToken}',
         },
       );
+      if (!mounted) return false;
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
         final data = body['data'] ?? body;
@@ -94,41 +128,59 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           _page = nextPage;
           _loadingMore = false;
         });
-      } else {
-        setState(() => _loadingMore = false);
+        return true;
       }
-    } catch (e) {
       setState(() => _loadingMore = false);
+      return false;
+    } catch (e) {
+      debugPrint('Error loading more transactions: $e');
+      if (mounted) setState(() => _loadingMore = false);
+      return false;
     }
   }
 
   List<dynamic> get _filteredTransactions {
-    if (_filterIndex == 0) return _allTransactions;
-    final type = _filterIndex == 1 ? 'CREDIT' : 'DEBIT';
+    if (_filterIndex == TransactionFilter.all) return _allTransactions;
+    final type =
+        _filterIndex == TransactionFilter.credit ? 'CREDIT' : 'DEBIT';
     return _allTransactions.where((t) => t['type'] == type).toList();
   }
 
-  String _formatDescription(dynamic txn) {
-    final desc = txn['description'] ?? '';
-    if (desc == 'Refund - Trip Issue') return 'Trip Adjustment';
-    return desc.isNotEmpty
-        ? desc
-        : (txn['type'] == 'CREDIT' ? 'Credit' : 'Debit');
+  /// The filter is applied to the rows already downloaded, so a driver whose
+  /// first page happens to be all credits used to open "Send Amount" (or tap the
+  /// Debit chip) and be told they had no transactions at all — with no way to
+  /// reach the later pages, because the infinite-scroll listener only fires on a
+  /// list that has something to scroll. Pull pages until the filter matches
+  /// something or the history runs out.
+  Future<void> _drainPagesForEmptyFilter() async {
+    while (mounted &&
+        _filterIndex != TransactionFilter.all &&
+        _filteredTransactions.isEmpty &&
+        _page < _totalPages &&
+        !_loadingMore) {
+      // Stop on a failed page rather than re-requesting it forever.
+      if (!await _loadMore()) return;
+    }
   }
 
-  String _formatDate(dynamic txn) {
-    final dateStr = txn['createdAt'] ?? '';
-    if (dateStr is String && dateStr.isNotEmpty) {
-      final date = DateTime.tryParse(dateStr)?.toLocal();
-      if (date != null) return DateFormat('dd MMM, hh:mm a').format(date);
+  /// Says which slice is empty. "No transactions yet" under a Send Amount header
+  /// claims the driver has no wallet history at all, which is usually false —
+  /// they just have no debits.
+  String get _emptyMessage {
+    switch (_filterIndex) {
+      case TransactionFilter.credit:
+        return 'No amounts received yet';
+      case TransactionFilter.debit:
+        return 'No amounts sent yet';
+      default:
+        return 'no_transactions'.tr;
     }
-    return '';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9FB),
+      backgroundColor: const Color(0xFFF4F5F7),
       body: Column(
         children: [
           commonAppBar(
@@ -150,12 +202,19 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    'transactions'.tr,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
+                  // Flexible: as a bare Row child the title got unbounded width,
+                  // so a long override or translation overflowed instead of
+                  // ellipsizing.
+                  Flexible(
+                    child: Text(
+                      widget.title ?? 'transactions'.tr,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   const Spacer(),
@@ -165,19 +224,20 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
           ),
 
           // Filter tabs
-          Container(
-            color: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                _buildFilterChip(0, 'all'.tr),
-                const SizedBox(width: 10),
-                _buildFilterChip(1, 'credit'.tr),
-                const SizedBox(width: 10),
-                _buildFilterChip(2, 'debit'.tr),
-              ],
+          if (widget.showFilters)
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  _buildFilterChip(TransactionFilter.all, 'all'.tr),
+                  const SizedBox(width: 10),
+                  _buildFilterChip(TransactionFilter.credit, 'credit'.tr),
+                  const SizedBox(width: 10),
+                  _buildFilterChip(TransactionFilter.debit, 'debit'.tr),
+                ],
+              ),
             ),
-          ),
 
           Expanded(
             // Pull-to-refresh, as the wallet screen has: a settlement landing
@@ -194,11 +254,28 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                         ? ListView(
                             physics: const AlwaysScrollableScrollPhysics(),
                             children: [
-                              const SizedBox(height: 200),
+                              const SizedBox(height: 180),
                               Center(
-                                  child: Text('no_transactions'.tr,
+                                  child: Text(_emptyMessage,
+                                      textAlign: TextAlign.center,
                                       style: const TextStyle(
                                           fontSize: 14, color: Colors.grey))),
+                              // Only shown while pages remain: the filter runs
+                              // client-side, so an empty slice does not mean an
+                              // empty history. _drainPagesForEmptyFilter() is
+                              // already fetching when this appears.
+                              if (_loadingMore) ...[
+                                const SizedBox(height: 16),
+                                Center(
+                                  child: SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppColors.appColor),
+                                  ),
+                                ),
+                              ],
                             ],
                           )
                         : _buildList(),
@@ -212,7 +289,12 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   Widget _buildFilterChip(int index, String label) {
     final isSelected = _filterIndex == index;
     return GestureDetector(
-      onTap: () => setState(() => _filterIndex = index),
+      onTap: () {
+        setState(() => _filterIndex = index);
+        // Switching to Credit/Debit can empty the downloaded slice; pull further
+        // pages so the chip doesn't read as "you have none".
+        _drainPagesForEmptyFilter();
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         decoration: BoxDecoration(
@@ -232,89 +314,28 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   }
 
   Widget _buildList() {
-    final transactions = _filteredTransactions;
+    // Grouping needs the whole page of rows to find month boundaries, so the
+    // group widgets are assembled up front and the ListView just indexes into
+    // them; a page is 30 rows, so nothing large is built eagerly.
+    final rows = buildMonthGroupedTransactions(_filteredTransactions);
     return ListView.builder(
       controller: _scrollController,
       // Always scrollable so pull-to-refresh works on a short list too.
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: transactions.length + (_loadingMore ? 1 : 0),
+      padding: const EdgeInsets.only(bottom: 24),
+      itemCount: rows.length + (_loadingMore ? 1 : 0),
       itemBuilder: (context, index) {
-        if (index == transactions.length) {
-          return const Padding(
-            padding: EdgeInsets.all(16),
-            child: Center(child: CircularProgressIndicator()),
+        if (index == rows.length) {
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: Center(
+              child: CircularProgressIndicator(color: AppColors.appColor),
+            ),
           );
         }
-        return _buildTransactionTile(transactions[index]);
+        return rows[index];
       },
     );
   }
 
-  Widget _buildTransactionTile(dynamic txn) {
-    final type = txn['type'] ?? '';
-    final isCredit = type == 'CREDIT';
-    final amount = (txn['amount'] ?? 0).toDouble();
-    final description = _formatDescription(txn);
-    final dateStr = _formatDate(txn);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: isCredit
-                  ? const Color(0xFFE8F5E9)
-                  : const Color(0xFFFFEBEE),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              isCredit
-                  ? Icons.arrow_downward_rounded
-                  : Icons.arrow_upward_rounded,
-              color: isCredit
-                  ? const Color(0xFF2E7D32)
-                  : const Color(0xFFC62828),
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(description,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 14)),
-                if (dateStr.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Text(dateStr,
-                      style: TextStyle(
-                          fontSize: 11, color: Colors.grey.shade500)),
-                ],
-              ],
-            ),
-          ),
-          Text(
-            "${isCredit ? '+' : '-'} \u20B9${amount.toStringAsFixed(2)}",
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: isCredit
-                  ? const Color(0xFF2E7D32)
-                  : const Color(0xFFC62828),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }

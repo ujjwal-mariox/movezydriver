@@ -93,6 +93,27 @@ class MyVehiclesApiService {
     return body['data'] as Map<String, dynamic>;
   }
 
+  /// Apply an admin-created onboarding coupon to a specific vehicle
+  Future<Map<String, dynamic>> applyCoupon({
+    required String vehicleId,
+    required String couponCode,
+  }) async {
+    final response = await http.post(
+      Uri.parse(ApiUrls.vehicleApplyCouponUrl(vehicleId)),
+      headers: _headers,
+      body: jsonEncode({'couponCode': couponCode}),
+    );
+
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    // {code, message, data} envelope: code 0 = rejected (invalid/expired/used).
+    if (response.statusCode < 200 ||
+        response.statusCode >= 300 ||
+        body['code'] == 0) {
+      throw Exception(body['message']?.toString() ?? 'Invalid coupon code');
+    }
+    return (body['data'] ?? {}) as Map<String, dynamic>;
+  }
+
   /// Get onboarding fee details (amounts, discounts)
   Future<Map<String, dynamic>> getOnboardingFee() async {
     final response = await http.get(

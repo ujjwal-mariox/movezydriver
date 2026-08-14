@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:hexcolor/hexcolor.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/CommonWidgets/app_bar.dart';
 import 'package:movezy_driver_app/CommonWidgets/button_widget.dart';
@@ -19,6 +20,14 @@ import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
 ///   • saves via PUT to the same endpoint and stays in settings (pops back),
 ///   • sends accountHolderName (the onboarding screen never did, so it was
 ///     always saved empty).
+///
+/// Once an account is on file, the server no longer lets this PUT overwrite it
+/// (a self-served swap is how a stolen phone redirects payouts) — it records a
+/// bankDetailsUpdateRequest an admin approves or rejects. The screen must not
+/// pretend such a submission applied: the button reads "Request To Update", a
+/// "requested" response keeps the driver here with a pending banner instead of
+/// popping with "saved", and GET's `updateRequest` renders the same banner (or
+/// the rejection, with the admin's reason) on the next visit.
 class BankDetailsSettingsScreen extends StatefulWidget {
   const BankDetailsSettingsScreen({super.key});
 
@@ -36,6 +45,17 @@ class _BankDetailsSettingsScreenState extends State<BankDetailsSettingsScreen> {
   bool _loading = true;
   bool _saving = false;
   bool _isVerified = false;
+
+  /// Whether an account number is already on file — this decides whether the
+  /// PUT writes directly ("Submit") or files an approval request ("Request To
+  /// Update"), so the button must say which one the driver is about to do.
+  bool _hasExistingAccount = false;
+
+  /// The server's bankDetailsUpdateRequest, verbatim (status PENDING /
+  /// APPROVED / REJECTED + requestedAt / decidedAt / rejectionReason). null
+  /// when the server sent none — the banner then simply doesn't render; no
+  /// status is ever synthesised client-side.
+  Map<String, dynamic>? _updateRequest;
 
   @override
   void initState() {
@@ -74,7 +94,14 @@ class _BankDetailsSettingsScreenState extends State<BankDetailsSettingsScreen> {
               (bank['accountNumber'] ?? '').toString();
           _ifscController.text = (bank['ifscCode'] ?? '').toString();
           _isVerified = bank['isVerified'] == true;
+          _hasExistingAccount =
+              (bank['accountNumber'] ?? '').toString().trim().isNotEmpty;
         }
+        // Rides alongside bankDetails so a request filed on a previous visit
+        // (or from another device) is visible the moment the screen opens.
+        final reqRaw = data is Map ? data['updateRequest'] : null;
+        _updateRequest =
+            reqRaw is Map ? Map<String, dynamic>.from(reqRaw) : null;
       }
     } catch (_) {
       // Non-fatal — the form just starts empty.
@@ -115,10 +142,50 @@ class _BankDetailsSettingsScreenState extends State<BankDetailsSettingsScreen> {
       final ok = res.statusCode == 200 || res.statusCode == 201;
       if (!mounted) return;
       if (ok) {
-        _snack('Bank details saved');
-        Navigator.pop(context, true);
+        // The PUT has two success outcomes now: a direct write (first-time
+        // details) or a PENDING approval request (an account was already on
+        // file). Telling a driver whose money-path change still needs an admin
+        // "saved" — and popping — would be a lie, so the two are told apart by
+        // the response itself.
+        Map<String, dynamic> body = const {};
+        try {
+          final decoded = jsonDecode(res.body);
+          if (decoded is Map) body = Map<String, dynamic>.from(decoded);
+        } catch (_) {
+          // Non-JSON 200 — fall through to the direct-write handling, which is
+          // all pre-request servers ever did.
+        }
+        final data = body['data'];
+        final reqRaw = data is Map ? data['updateRequest'] : null;
+        final requested = body['message'] == 'bank_update_requested' ||
+            (reqRaw is Map &&
+                (reqRaw['status'] ?? '').toString().toUpperCase() == 'PENDING');
+        if (requested) {
+          setState(() {
+            _hasExistingAccount = true;
+            _updateRequest = reqRaw is Map
+                ? Map<String, dynamic>.from(reqRaw)
+                // The server said "requested" without echoing the request row;
+                // PENDING is that message's meaning, not a guess.
+                : {'status': 'PENDING'};
+          });
+          _snack('Update requested — awaiting approval');
+        } else {
+          _snack('Bank details saved');
+          Navigator.pop(context, true);
+        }
       } else {
-        _snack('Could not save bank details. Try again.', isError: true);
+        // Surface the server's own reason when it sent one (the envelope's
+        // `message`), instead of a blind generic.
+        String msg = 'Could not save bank details. Try again.';
+        try {
+          final decoded = jsonDecode(res.body);
+          if (decoded is Map &&
+              (decoded['message'] ?? '').toString().trim().isNotEmpty) {
+            msg = decoded['message'].toString();
+          }
+        } catch (_) {}
+        _snack(msg, isError: true);
       }
     } catch (_) {
       if (mounted) _snack('Network error. Try again.', isError: true);
@@ -132,6 +199,127 @@ class _BankDetailsSettingsScreenState extends State<BankDetailsSettingsScreen> {
       content: Text(msg),
       backgroundColor: isError ? Colors.red : Colors.green,
     ));
+  }
+
+  String? _fmtDate(dynamic raw) {
+    final parsed = DateTime.tryParse(raw?.toString() ?? '');
+    return parsed == null
+        ? null
+        : DateFormat('MMM d, yyyy').format(parsed.toLocal());
+  }
+
+  /// Display-only masking for the banner; the request itself keeps the full
+  /// number.
+  String _last4(String value) =>
+      value.length <= 4 ? value : value.substring(value.length - 4);
+
+  /// The lifecycle of the driver's change request, straight off the server.
+  /// Rendered only from a status the server actually sent — inventing an
+  /// approval state on a payout account is exactly what this flow exists to
+  /// prevent.
+  Widget _requestBanner() {
+    final request = _updateRequest;
+    if (request == null) return const SizedBox.shrink();
+
+    final status = (request['status'] ?? '').toString().toUpperCase();
+    final requestedAt = _fmtDate(request['requestedAt']);
+    final decidedAt = _fmtDate(request['decidedAt']);
+
+    Color bg;
+    Color border;
+    Color fg;
+    IconData icon;
+    String title;
+    final lines = <String>[];
+
+    switch (status) {
+      case 'PENDING':
+        bg = const Color(0xFFFFF8E1);
+        border = const Color(0xFFFFD54F);
+        fg = const Color(0xFF9A6700);
+        icon = Icons.hourglass_top_rounded;
+        title = 'Update requested — awaiting approval';
+        final bank = (request['bankName'] ?? '').toString().trim();
+        final acct = (request['accountNumber'] ?? '').toString().trim();
+        final what = <String>[
+          if (bank.isNotEmpty) bank,
+          if (acct.isNotEmpty) 'a/c ····${_last4(acct)}',
+        ];
+        if (what.isNotEmpty || requestedAt != null) {
+          lines.add([
+            'Requested',
+            if (what.isNotEmpty) what.join(' '),
+            if (requestedAt != null) 'on $requestedAt',
+          ].join(' '));
+        }
+        // Both facts matter to the driver: payouts still go to the old
+        // account meanwhile, and the server keeps only the latest request.
+        lines.add('Your current account stays in use until an admin approves. '
+            'Submitting again replaces this request.');
+        break;
+      case 'REJECTED':
+        bg = const Color(0xFFFFEBEE);
+        border = const Color(0xFFEF9A9A);
+        fg = const Color(0xFFB71C1C);
+        icon = Icons.cancel_outlined;
+        title = 'Update request rejected';
+        final reason = (request['rejectionReason'] ?? '').toString().trim();
+        if (reason.isNotEmpty) lines.add('Reason: $reason');
+        if (decidedAt != null) lines.add('Decided on $decidedAt');
+        lines.add('You can request another update below.');
+        break;
+      case 'APPROVED':
+        bg = const Color(0xFFE8F5E9);
+        border = const Color(0xFFA5D6A7);
+        fg = const Color(0xFF1B5E20);
+        icon = Icons.check_circle_outline;
+        title = 'Update request approved';
+        if (decidedAt != null) lines.add('Approved on $decidedAt');
+        lines.add('The details below are now your account on file.');
+        break;
+      default:
+        // A status this build doesn't know is not guessed at.
+        return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: fg),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                      color: fg, fontSize: 13.5, fontWeight: FontWeight.w700),
+                ),
+                for (final line in lines) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    line,
+                    style: TextStyle(
+                        color: fg.withValues(alpha: 0.85),
+                        fontSize: 11.5,
+                        height: 1.3),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -166,7 +354,12 @@ class _BankDetailsSettingsScreenState extends State<BankDetailsSettingsScreen> {
               child: ButtonWidget(
                 onTap: _saving ? null : _save,
                 borderRadius: BorderRadius.circular(8),
-                text: _saving ? 'Saving...' : 'save'.tr,
+                // The label is a promise: with an account on file this button
+                // files an approval request and changes nothing by itself, so
+                // it must not say anything save-shaped.
+                text: _saving
+                    ? (_hasExistingAccount ? 'Requesting…' : 'Saving…')
+                    : (_hasExistingAccount ? 'Request To Update' : 'submit'.tr),
                 backgroundColor: AppColors.appColor,
               ),
             ),
@@ -230,6 +423,7 @@ class _BankDetailsSettingsScreenState extends State<BankDetailsSettingsScreen> {
                         ],
                       ),
                     ),
+                  _requestBanner(),
                   const SizedBox(height: 8),
                   _sectionHeader('bank_details'.tr),
                   const SizedBox(height: 17),

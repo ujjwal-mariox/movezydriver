@@ -22,6 +22,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:movezy_driver_app/Services/routing_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:fluttertoast/fluttertoast.dart';
+import 'package:intl/intl.dart';
 
 class BookingDetailPage extends StatefulWidget {
   final DashboardBooking booking;
@@ -243,14 +244,33 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
     }
   }
 
+  /// Scheduled pickup time where there is one, else when the job was raised -
+  /// the design's "Start In" row. The backend can send the literal string
+  /// "null", which must not be shown as a time.
+  String _startTime() {
+    for (final raw in [booking.scheduledAt, booking.assignedAt, booking.createdAt]) {
+      if (raw.isEmpty || raw == 'null') continue;
+      final dt = DateTime.tryParse(raw);
+      if (dt == null) continue;
+      return DateFormat('hh:mm a').format(dt.toLocal());
+    }
+    return '--';
+  }
+
+  /// Before the goods are aboard the driver is heading to the pickup;
+  /// afterwards, to the drop.
+  bool get _headingToPickup =>
+      booking.status == 'ASSIGNED' || booking.status == 'DRIVER_ARRIVED';
+
   @override
   Widget build(BuildContext context) {
     const Color cardBorder = Color(0xFFE6EEF2);
-    // serviceType is WITHIN_CITY | OUTSTATION. This rendered WITHIN_CITY as
-    // "One Way", while the trip summary renders the same value as "Within City"
-    // — one booking, two names. One-way/round-trip is a different axis that
-    // doesn't exist in the booking model at all, so don't imply it here.
-    String serviceLabel = booking.serviceType == "OUTSTATION" ? "Outstation" : "Within City";
+    // serviceType is WITHIN_CITY | OUTSTATION. "One Way" is a PRODUCT-CHOSEN
+    // label for WITHIN_CITY, not a field: nothing in the booking model records a
+    // one-way/round-trip axis, and the trip-summary screen still calls the same
+    // value "Within City". Kept because the design calls for it — if the two
+    // names ever need to agree, change the copy, not the mapping.
+    String serviceLabel = booking.serviceType == "OUTSTATION" ? "Outstation" : "One Way";
 
     // What this trip pays the DRIVER (subtotal minus commission, pre-GST) —
     // the same figure the Take Booking screen quoted. estimatedFare is the
@@ -397,9 +417,13 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
                               border: Border.all(color: cardBorder),
                               boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 3))],
                             ),
+                            // The design's four rows: Start In, Customer Name,
+                            // the address, and the goods type - replacing a
+                            // Status row (the trip stage already names the
+                            // slider) and a pickup+drop pair.
                             child: Column(
                               children: [
-                                // Status
+                                // Start In
                                 Row(
                                   children: [
                                     SizedBox(
@@ -407,20 +431,13 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
                                       child: Image.asset("assets/clock.png", height: 27, width: 27, fit: BoxFit.cover, color: AppColors.appColor),
                                     ),
                                     const SizedBox(width: 10),
-                                    Text('status'.tr, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w600, fontSize: 12)),
+                                    const Text('Start In', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600, fontSize: 13)),
                                     const Spacer(),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: HexColor("#64B161"),
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(booking.status, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
-                                    ),
+                                    Text(_startTime(), style: TextStyle(color: HexColor("#364B63"), fontSize: 13, fontWeight: FontWeight.w500)),
                                   ],
                                 ),
                                 Container(margin: const EdgeInsets.symmetric(vertical: 10), color: Colors.grey, height: 0.4, width: MediaQuery.of(context).size.width - 50),
-                                // Customer
+                                // Customer Name
                                 Row(
                                   children: [
                                     SizedBox(
@@ -428,31 +445,56 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
                                       child: Image.asset("assets/profile_circle.png", height: 27, width: 27, fit: BoxFit.cover, color: AppColors.appColor),
                                     ),
                                     const SizedBox(width: 10),
-                                    Text('customer'.tr, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w600, fontSize: 12)),
+                                    const Text('Customer Name', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600, fontSize: 13)),
                                     const Spacer(),
-                                    Flexible(child: Text(booking.customerName, style: TextStyle(color: HexColor("#364B63"), fontSize: 12), overflow: TextOverflow.ellipsis)),
+                                    Flexible(child: Text(booking.customerName, style: TextStyle(color: HexColor("#364B63"), fontSize: 13), overflow: TextOverflow.ellipsis)),
                                   ],
                                 ),
                                 Container(margin: const EdgeInsets.symmetric(vertical: 10), color: Colors.grey, height: 0.4, width: MediaQuery.of(context).size.width - 50),
-                                // Pickup address
+                                // The stage's target address - pickup until the
+                                // goods are aboard, drop afterwards. The design
+                                // draws ONE address row; showing whichever one
+                                // the driver is actually heading to keeps that
+                                // without hiding where the trip goes next.
                                 Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Icon(Icons.place, color: AppColors.greenColor),
+                                    SizedBox(
+                                      height: 24, width: 24,
+                                      child: Image.asset("assets/location.png", height: 24, width: 24, fit: BoxFit.contain, color: AppColors.appColor),
+                                    ),
                                     const SizedBox(width: 10),
-                                    Expanded(child: Text(booking.pickup.address, style: const TextStyle(color: Colors.black87, fontSize: 12, fontWeight: FontWeight.w500))),
+                                    Expanded(
+                                      child: Text(
+                                        _headingToPickup ? booking.pickup.address : booking.drop.address,
+                                        style: const TextStyle(color: Colors.black87, fontSize: 13, fontWeight: FontWeight.w500, height: 1.45),
+                                      ),
+                                    ),
                                   ],
                                 ),
-                                const SizedBox(height: 8),
-                                // Drop address
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Icon(Icons.place, color: Colors.red),
-                                    const SizedBox(width: 10),
-                                    Expanded(child: Text(booking.drop.address, style: const TextStyle(color: Colors.black87, fontSize: 12, fontWeight: FontWeight.w500))),
-                                  ],
-                                ),
+                                if (booking.goodsType.isNotEmpty) ...[
+                                  Container(margin: const EdgeInsets.symmetric(vertical: 10), color: Colors.grey, height: 0.4, width: MediaQuery.of(context).size.width - 50),
+                                  // Goods type + description, per the design
+                                  // ("Furniture - Chairs, tables, small home
+                                  // items"). No package-outline asset ships in
+                                  // this app, so a Material glyph stands in
+                                  // until one is exported from Figma.
+                                  Row(
+                                    children: [
+                                      Icon(Icons.inventory_2_outlined, size: 22, color: AppColors.appColor),
+                                      const SizedBox(width: 12),
+                                      Text(booking.goodsType, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w600, fontSize: 13)),
+                                      const Spacer(),
+                                      Flexible(
+                                        child: Text(
+                                          booking.goodsDescription,
+                                          style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -468,12 +510,40 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
                               border: Border.all(color: cardBorder),
                               boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 6, offset: const Offset(0, 3))],
                             ),
+                            // The design's three equal columns. Get Directions is
+                            // the emphasised one - a solid orange rounded square
+                            // holding a white glyph, which is exactly how
+                            // get_direction.png is cut: one flat colour with the
+                            // paper-plane knocked out to transparency, so tinting
+                            // it orange over this white card gives the design
+                            // (the shipped fill is the old green, hence the tint).
                             child: Row(
                               children: [
-                                _ActionTile(icon: Icons.call, label: 'contact'.tr, onTap: _callCustomer),
                                 _ActionTile(
-                                  icon: Icons.chat_bubble_outline,
+                                  icon: Image.asset("assets/call_icon.png",
+                                      height: 28, width: 28, color: AppColors.appColor),
+                                  label: 'contact'.tr,
+                                  onTap: _callCustomer,
+                                ),
+                                _ActionTile(
+                                  icon: Image.asset("assets/get_direction.png",
+                                      height: 38, width: 38, color: AppColors.appColor),
+                                  label: 'get_directions'.tr,
+                                  onTap: _openDirections,
+                                ),
+                                // The design's third column is "ID Card", but the
+                                // driver's booking payload carries no customer
+                                // identity beyond a name and a phone number -
+                                // no ID document, photo or KYC field exists to
+                                // show (mapDashboardBooking, driver.controller.ts).
+                                // A tile that opens nothing is worse than none,
+                                // so the slot holds Chat, which is real and
+                                // would otherwise have lost its home here.
+                                _ActionTile(
+                                  icon: Icon(Icons.chat_bubble_outline,
+                                      color: AppColors.appColor, size: 28),
                                   label: 'Chat',
+                                  showDivider: false,
                                   onTap: () => pushTo(
                                     context,
                                     ChatScreen(
@@ -482,16 +552,6 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
                                     ),
                                   ),
                                 ),
-                                _ActionTile(icon: Icons.directions, label: 'directions'.tr, onTap: _openDirections),
-                                // Pre-pickup only: once goods are aboard,
-                                // cancelling is a support case.
-                                if (booking.status == 'ASSIGNED' ||
-                                    booking.status == 'DRIVER_ARRIVED')
-                                  _ActionTile(
-                                    icon: Icons.close,
-                                    label: 'Cancel',
-                                    onTap: _cancelBooking,
-                                  ),
                               ],
                             ),
                           ),
@@ -635,6 +695,29 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
                               ),
                             ],
                           ),
+
+                          // Cancelling is still pre-pickup only: once the goods
+                          // are aboard it is a support case. The design's action
+                          // row has no room for it, so it sits with the other
+                          // "something is wrong" routes as a quiet text button -
+                          // deleting it would have taken away the driver's only
+                          // way to hand a bad pickup back.
+                          if (booking.status == 'ASSIGNED' ||
+                              booking.status == 'DRIVER_ARRIVED')
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                onPressed: _cancelBooking,
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  minimumSize: const Size(0, 36),
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                icon: const Icon(Icons.close, size: 15, color: Colors.red),
+                                label: Text('cancel_booking'.tr,
+                                    style: const TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.w600)),
+                              ),
+                            ),
                           const SizedBox(height: 7),
 
                           // At Pickup slider
@@ -666,10 +749,22 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
 }
 
 class _ActionTile extends StatelessWidget {
-  final IconData icon;
+  /// A whole widget, not an IconData: one of the design's three columns is a
+  /// solid orange square rendered from an asset, the others are glyphs.
+  final Widget icon;
   final String label;
   final VoidCallback onTap;
-  const _ActionTile({required this.icon, required this.label, required this.onTap});
+
+  /// The separator sits between columns, so the last one leaves it off -
+  /// a trailing rule used to draw a line down the card's own right edge.
+  final bool showDivider;
+
+  const _ActionTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.showDivider = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -678,15 +773,29 @@ class _ActionTile extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          decoration: const BoxDecoration(
-            border: Border(right: BorderSide(color: cardBorder, width: 1)),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+          decoration: BoxDecoration(
+            border: showDivider
+                ? const Border(right: BorderSide(color: cardBorder, width: 1))
+                : null,
           ),
           child: Column(
             children: [
-              Icon(icon, color: AppColors.appColor, size: 30),
+              // Fixed boxes for both rows: the emphasised square is taller than
+              // the glyphs beside it, and translated labels ("Get Directions" is
+              // one word longer in several locales) wrap to two lines. Without
+              // them the columns end up different heights and the separators
+              // between them come out ragged.
+              SizedBox(height: 38, child: Center(child: icon)),
               const SizedBox(height: 6),
-              Text(label, style: const TextStyle(color: Colors.black, fontSize: 13, fontWeight: FontWeight.w600)),
+              SizedBox(
+                height: 32,
+                child: Text(label,
+                    maxLines: 2,
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.black, fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
             ],
           ),
         ),

@@ -172,59 +172,73 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 30),
+                            // 30/30/30 everywhere flattened the design's rhythm:
+                            // the illustration sits closer to the headline, and
+                            // the stats card overlaps its base.
+                            const SizedBox(height: 18),
                             Image.asset(
                               "assets/mobile_icon.png",
                               height: 180,
-                              fit: BoxFit.cover,
+                              fit: BoxFit.contain,
                             ),
+                            const SizedBox(height: 4),
+                            // Responsive width with equal side insets, as the
+                            // design draws it. This was `width: 300` — a fixed
+                            // size that left a wide gutter on a large phone and
+                            // could not fit a narrow one, and the four Spacers
+                            // divided whatever was left unevenly so the two
+                            // halves never lined up against the centre rule.
+                            // Expanded halves make each side exactly 50%.
                             Container(
-                              width: 300,
-                              padding: const EdgeInsets.only(top: 10, bottom: 10),
+                              margin:
+                                  const EdgeInsets.symmetric(horizontal: 20),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 14),
                               decoration: BoxDecoration(
                                 color: AppColors.appColor,
-                                border: Border.all(color: Colors.white, width: 2),
-                                borderRadius: BorderRadius.circular(10),
+                                border:
+                                    Border.all(color: Colors.white, width: 2),
+                                borderRadius: BorderRadius.circular(12),
                               ),
                               child: Row(
                                 children: [
-                                  const Spacer(),
-                                  Column(
-                                    children: [
-                                      Text(
-                                        "${_referralCount.toString().padLeft(2, '0')}\nReferrals",
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 17),
-                                      )
-                                    ],
+                                  Expanded(
+                                    child: Text(
+                                      "${_referralCount.toString().padLeft(2, '0')}\nReferrals",
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 17,
+                                          height: 1.35),
+                                    ),
                                   ),
-                                  const Spacer(),
-                                  Container(height: 40, width: 2, color: Colors.white),
-                                  const Spacer(),
-                                  Column(
-                                    children: [
-                                      Text(
-                                        "₹${_totalEarnings.toStringAsFixed(0)}\nEarnings",
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 17),
-                                      )
-                                    ],
+                                  Container(
+                                      height: 40,
+                                      width: 1.5,
+                                      color: Colors.white),
+                                  Expanded(
+                                    child: Text(
+                                      "₹${_totalEarnings.toStringAsFixed(0)}\nEarnings",
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 17,
+                                          height: 1.35),
+                                    ),
                                   ),
-                                  const Spacer(),
                                 ],
                               ),
                             ),
                             const SizedBox(height: 30),
-                            Container(
+                            // The 60%-black wrapper that used to sit here painted
+                            // a dark band across the seam between the hero art
+                            // and the white sheet — visible on any device where
+                            // the sheet did not start exactly at the artwork's
+                            // edge. The design has no such band.
+                            SizedBox(
                               width: MediaQuery.of(context).size.width,
-                              decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.6)),
                               child: Container(
                                 decoration: const BoxDecoration(
                                   color: Colors.white,

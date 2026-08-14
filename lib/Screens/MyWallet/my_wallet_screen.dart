@@ -1,17 +1,23 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/CommonWidgets/app_bar.dart';
 import 'package:movezy_driver_app/Screens/BankDetailsScreen/bank_details_settings_screen.dart';
+import 'package:movezy_driver_app/Screens/MyWallet/Widgets/wallet_transaction_list.dart';
 import 'package:movezy_driver_app/Screens/RechargeWalletScreen/recharge_wallet_screen.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/dashboard_api_service.dart';
 import 'package:movezy_driver_app/Screens/TransactionsScreen/transactions_screen.dart';
 import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:intl/intl.dart';
 import 'package:get/get.dart';
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
+
+/// The four-action strip under the balance. Darker than the #364B63 disc baked
+/// into each action PNG so those discs read as raised buttons on it.
+const Color _kActionPanel = Color(0xFF26313E);
+const Color _kPageBg = Color(0xFFF4F5F7);
 
 class MyWalletScreen extends StatefulWidget {
   const MyWalletScreen({super.key});
@@ -24,7 +30,6 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
   double _balance = 0;
   List<dynamic> _transactions = [];
   bool _loading = true;
-  final NumberFormat _money = NumberFormat.currency(locale: 'en_IN', symbol: '\u20B9', decimalDigits: 0);
 
   final DashboardApiService _api = DashboardApiService();
   // Withdrawable earnings info (from /wallet/withdrawal-info).
@@ -90,21 +95,6 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
   // Real driver earnings live on the booking as driverEarnings, frozen at
   // completion, and reach the app as the server-computed lifetime total from
   // /wallet/withdrawal-info, which is what the card now shows.
-
-  String _formatDescription(dynamic txn) {
-    final desc = txn['description'] ?? '';
-    if (desc == 'Refund - Trip Issue') return 'Trip Adjustment';
-    return desc.isNotEmpty ? desc : (txn['type'] == 'CREDIT' ? 'Credit' : 'Debit');
-  }
-
-  String _formatDate(dynamic txn) {
-    final dateStr = txn['createdAt'] ?? '';
-    if (dateStr is String && dateStr.isNotEmpty) {
-      final date = DateTime.tryParse(dateStr)?.toLocal();
-      if (date != null) return DateFormat('dd MMM, hh:mm a').format(date);
-    }
-    return '';
-  }
 
   void _showWhyRechargeInfo() {
     showModalBottomSheet(
@@ -241,7 +231,7 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
     }
     if (_available < _minWithdrawal) {
       _showSnack(
-        '${'min_withdrawal_is'.tr} ${_money.format(_minWithdrawal)}',
+        '${'min_withdrawal_is'.tr} ${walletMoney.format(_minWithdrawal)}',
         isError: true,
       );
       return;
@@ -280,7 +270,7 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
                   Text('withdraw'.tr, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 6),
                   Text(
-                    '${'available_to_withdraw'.tr}: ${_money.format(_available)}',
+                    '${'available_to_withdraw'.tr}: ${walletMoney.format(_available)}',
                     style: const TextStyle(fontSize: 13, color: Colors.black54),
                   ),
                   const SizedBox(height: 16),
@@ -364,7 +354,7 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
       return;
     }
     if (amount < _minWithdrawal) {
-      _showSnack('${'min_withdrawal_is'.tr} ${_money.format(_minWithdrawal)}', isError: true);
+      _showSnack('${'min_withdrawal_is'.tr} ${walletMoney.format(_minWithdrawal)}', isError: true);
       return;
     }
     if (amount > _available) {
@@ -407,10 +397,11 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
     );
   }
 
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F8FC),
+      backgroundColor: _kPageBg,
       body: _loading
           ? Column(
               children: [
@@ -426,13 +417,12 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _buildAppBar(),
-                    _buildBalanceCard(),
-                    const SizedBox(height: 16),
-                    _buildQuickActions(),
-                    const SizedBox(height: 20),
-                    _buildTransactionList(),
+                    _buildBalanceAndActionsCard(),
+                    _buildEarningsAndWithdrawCard(),
+                    ..._buildTransactionSection(),
                     const SizedBox(height: 30),
                   ],
                 ),
@@ -477,289 +467,337 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
     );
   }
 
-  Widget _buildBalanceCard() {
+  /// Orange balance panel and the dark four-action strip, joined inside one
+  /// ClipRRect so they read as a single card with no seam between them.
+  Widget _buildBalanceAndActionsCard() {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF1A237E), Color(0xFF283593)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF1A237E).withValues(alpha: 0.3),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
+            color: AppColors.appColor.withValues(alpha: 0.20),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
-      child: Column(
-        children: [
-          Text('total_available_balance'.tr, style: const TextStyle(color: Colors.white60, fontSize: 13)),
-          const SizedBox(height: 8),
-          Text(
-            _money.format(_balance),
-            style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 16),
-          // Total earnings — the server's lifetimeEarnings from
-          // /wallet/withdrawal-info (completed-trip driverEarnings + awarded
-          // incentives). This row was labelled "This Week's Earnings" over a
-          // wallet top-up total; the label now says exactly what the number is.
-          // The label is plain English because there is no translation key for
-          // it and the localisation files are outside this change — a correct
-          // English label beats a localised untruth. Add a `total_earnings` key
-          // and swap it in when the translations are next touched.
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                // Expanded: as a bare Row child the label got unbounded width, so a
-                // long label could never ellipsize. The amount stays non-flex,
-                // so it still sits hard right exactly as spaceBetween put it.
-                const Expanded(
-                  child: Text(
-                    'Total earnings (all time)',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.white70, fontSize: 13),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              color: AppColors.appColor,
+              child: Stack(
+                children: [
+                  // Decorative only, and painted first so the amount always sits
+                  // on top of it. IgnorePointer keeps it out of hit-testing.
+                  Positioned(
+                    top: -34,
+                    right: -26,
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        size: const Size(190, 150),
+                        painter: _SwirlPainter(),
+                      ),
+                    ),
                   ),
-                ),
-                Text(_money.format(_lifetimeEarnings), style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Available to withdraw (earned from completed trips, minus payouts)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                // Expanded: bare Row child got unbounded width, so the translated
-                // label could never ellipsize against the amount.
-                Expanded(
-                  child: Text(
-                    'available_to_withdraw'.tr,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 26, 20, 24),
+                    child: Column(
+                      children: [
+                        // 'total_available_balance' would have read "Total
+                        // Available Balance", which is the label the withdrawable
+                        // figure in the card below carries — two different numbers
+                        // under one name. This is the wallet's own balance, so it
+                        // is labelled plainly. English literal because the screen
+                        // already mixes literals with .tr and no matching key
+                        // exists; add a `total_balance` key when the translation
+                        // maps are next touched.
+                        const Text(
+                          'Total balance',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        // FittedBox: a large balance at a big text scale would
+                        // otherwise overflow the card width rather than shrink.
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            walletMoney.format(_balance),
+                            maxLines: 1,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 38,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                Text(_money.format(_available), style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
-              ],
-            ),
-          ),
-          // A "Next Payout: Every Monday" row used to sit here. No such schedule
-          // exists anywhere: a payout is created only when the driver taps
-          // Withdraw below, and it is released when an operator approves it in
-          // the admin payout queue. There is no weekly run and no server-side
-          // next-payout date to read, so the row is gone rather than guessing.
-          const SizedBox(height: 20),
-          // WITHDRAW BUTTON (big)
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton.icon(
-              onPressed: _openWithdrawSheet,
-              icon: const Icon(Icons.account_balance, size: 20),
-              label: Text('withdraw'.tr, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: 1)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: const Color(0xFF1A237E),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                elevation: 0,
+                ],
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQuickActions() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: _actionButton(
-              icon: Icons.add_circle_outline,
-              label: 'Recharge',
-              color: AppColors.appColor,
-              onTap: () {
-                pushTo(context, RechargeScreen()).then((_) => _fetchWallet());
-              },
-              showInfo: true,
+            Container(
+              color: _kActionPanel,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _walletAction(
+                      asset: 'rechage_amount',
+                      label: 'Recharge Wallet',
+                      onTap: () {
+                        pushTo(context, const RechargeScreen()).then((_) {
+                          if (mounted) _fetchWallet();
+                        });
+                      },
+                    ),
+                  ),
+                  Expanded(
+                    child: _walletAction(
+                      asset: 'statement',
+                      label: 'Wallet Statement',
+                      // Unfiltered, chips left on: this is the one entry point
+                      // where the driver is meant to slice the list themselves.
+                      onTap: () => pushTo(context, const TransactionsScreen()),
+                    ),
+                  ),
+                  Expanded(
+                    child: _walletAction(
+                      asset: 'send_amount',
+                      label: 'Send Amount',
+                      onTap: () => pushTo(
+                        context,
+                        const TransactionsScreen(
+                          initialFilter: TransactionFilter.debit,
+                          title: 'Send Amount',
+                          showFilters: false,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: _walletAction(
+                      asset: 'recieve_amount',
+                      label: 'Received Amount',
+                      onTap: () => pushTo(
+                        context,
+                        const TransactionsScreen(
+                          initialFilter: TransactionFilter.credit,
+                          title: 'Received Amount',
+                          showFilters: false,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _actionButton(
-              icon: Icons.receipt_long,
-              label: 'Transactions',
-              color: const Color(0xFF2575FC),
-              onTap: () {
-                pushTo(context, const TransactionsScreen());
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _actionButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-    bool showInfo = false,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8, offset: const Offset(0, 2)),
           ],
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(width: 8),
-            // Flexible: bare Row child got unbounded width. Each button is only half
-            // the screen wide, so the label + icon(s) overflow once text scale grows.
-            // Loose fit keeps the row centred at normal sizes.
-            Flexible(
-              child: Text(
+      ),
+    );
+  }
+
+  Widget _walletAction({
+    required String asset,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      // Transparent Material so the ink splash lands on the dark panel; without
+      // it InkWell would splash on the Scaffold's Material, hidden underneath.
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+          child: Column(
+            children: [
+              // Each PNG already *is* the design's dark circular button with a
+              // white outline glyph — a #364B63 disc on transparency — so it is
+              // dropped straight onto the panel instead of being re-drawn behind.
+              Image.asset('assets/$asset.png', width: 46, height: 46),
+              const SizedBox(height: 8),
+              Text(
                 label,
-                maxLines: 1,
+                textAlign: TextAlign.center,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: color),
-              ),
-            ),
-            if (showInfo) ...[
-              const SizedBox(width: 6),
-              GestureDetector(
-                onTap: _showWhyRechargeInfo,
-                child: Icon(Icons.help_outline, size: 16, color: Colors.grey.shade400),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                  height: 1.25,
+                ),
               ),
             ],
-          ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildTransactionList() {
-    if (_transactions.isEmpty) {
-      return Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16),
-        padding: const EdgeInsets.all(32),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Center(
-          child: Text('no_transactions'.tr, style: const TextStyle(fontSize: 14, color: Colors.grey)),
-        ),
-      );
-    }
-
+  /// Not in the design, and deliberately kept: Withdraw creates a real payout
+  /// request, and the two figures here are the only real earnings numbers the app
+  /// has (server-computed lifetime earnings and the withdrawable balance). The
+  /// design's single "Total balance" is the wallet balance above, which is a
+  /// different quantity — dropping this block would have removed the withdrawal
+  /// feature and the only place a driver can see what they have actually earned.
+  Widget _buildEarningsAndWithdrawCard() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Text('transaction_history'.tr, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Your earnings',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+              ),
+              // The "About your wallet" sheet used to hang off a help icon on the
+              // old Recharge button, which the four-action strip replaced. Moved
+              // here so the explanation stays reachable rather than being lost.
+              InkWell(
+                onTap: _showWhyRechargeInfo,
+                borderRadius: BorderRadius.circular(20),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(Icons.help_outline, size: 18, color: Colors.grey.shade400),
+                ),
+              ),
+            ],
           ),
-          ListView.separated(
-            physics: const NeverScrollableScrollPhysics(),
-            shrinkWrap: true,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: _transactions.length,
-            separatorBuilder: (_, i) => Divider(height: 1, color: Colors.grey.shade100),
-            itemBuilder: (_, index) => _buildTransactionTile(_transactions[index]),
-          ),
-          const SizedBox(height: 12),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTransactionTile(dynamic txn) {
-    final type = txn['type'] ?? '';
-    final isCredit = type == 'CREDIT';
-    final amount = (txn['amount'] ?? 0).toDouble();
-    final description = _formatDescription(txn);
-    final dateStr = _formatDate(txn);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          // Icon
-          Container(
-            width: 40, height: 40,
-            decoration: BoxDecoration(
-              color: isCredit ? const Color(0xFFE8F5E9) : const Color(0xFFFFEBEE),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              isCredit ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
-              color: isCredit ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          // Description + date
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(description, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                if (dateStr.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(dateStr, style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-                ],
-              ],
-            ),
-          ),
-          // Amount
-          Text(
-            "${isCredit ? '+' : '-'} ${_money.format(amount)}",
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: isCredit ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
+          const SizedBox(height: 10),
+          _earningsRow('Total earnings (all time)', _lifetimeEarnings),
+          const Divider(height: 20, thickness: 1, color: Color(0xFFF0F1F4)),
+          _earningsRow('available_to_withdraw'.tr, _available),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton.icon(
+              onPressed: _openWithdrawSheet,
+              icon: const Icon(Icons.account_balance, size: 19),
+              // The button was white-on-indigo before the card turned white, so it
+              // takes the brand fill to stay visible.
+              label: Text('withdraw'.tr, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.6)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.appColor,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
             ),
           ),
         ],
       ),
     );
   }
+
+  Widget _earningsRow(String label, double amount) {
+    return Row(
+      children: [
+        // Expanded: as a bare Row child the label got unbounded width and could
+        // never ellipsize against the amount.
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13, color: Colors.black54),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          walletMoney.format(amount),
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF1E2430)),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildTransactionSection() {
+    // /driver/wallet returns the latest rows inline; an empty list means the
+    // driver genuinely has no wallet movements, so it says exactly that instead
+    // of showing sample rows. The full paginated history is one tap away via
+    // Wallet Statement.
+    if (_transactions.isEmpty) {
+      return [
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+          padding: const EdgeInsets.all(28),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Center(
+            child: Text(
+              'no_transactions'.tr,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+          ),
+        ),
+      ];
+    }
+    return buildMonthGroupedTransactions(_transactions);
+  }
+}
+
+/// The design's faint swirl in the balance card's top-right corner: a few
+/// concentric arcs at low opacity. The parent ClipRRect trims whatever runs past
+/// the card's rounded corner.
+class _SwirlPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..strokeCap = StrokeCap.round
+      ..color = Colors.white.withValues(alpha: 0.18);
+
+    final center = Offset(size.width * 0.68, size.height * 0.22);
+    for (var i = 0; i < 3; i++) {
+      final radius = size.width * (0.28 + i * 0.17);
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        math.pi * 0.52,
+        math.pi * 0.96,
+        false,
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

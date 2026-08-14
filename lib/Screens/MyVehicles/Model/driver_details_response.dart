@@ -67,6 +67,8 @@ class VehicleItem {
   String? onboardingPaymentId;
   String? referralCodeApplied;
   num? referralDiscount;
+  num? couponDiscount;
+  String? couponCodeApplied;
   String? verificationStatus;
   bool? isPrimary;
   bool? isActive;
@@ -85,6 +87,8 @@ class VehicleItem {
     this.onboardingPaymentId,
     this.referralCodeApplied,
     this.referralDiscount,
+    this.couponDiscount,
+    this.couponCodeApplied,
     this.verificationStatus,
     this.isPrimary,
     this.isActive,
@@ -104,6 +108,8 @@ class VehicleItem {
     onboardingPaymentId = json['onboardingPaymentId'];
     referralCodeApplied = json['referralCodeApplied'];
     referralDiscount = json['referralDiscount'];
+    couponDiscount = json['couponDiscount'];
+    couponCodeApplied = json['couponCodeApplied'];
     verificationStatus = json['verificationStatus'];
     isPrimary = json['isPrimary'];
     isActive = json['isActive'];
@@ -124,6 +130,8 @@ class VehicleItem {
     data['onboardingPaymentId'] = onboardingPaymentId;
     data['referralCodeApplied'] = referralCodeApplied;
     data['referralDiscount'] = referralDiscount;
+    data['couponDiscount'] = couponDiscount;
+    data['couponCodeApplied'] = couponCodeApplied;
     data['verificationStatus'] = verificationStatus;
     data['isPrimary'] = isPrimary;
     data['isActive'] = isActive;

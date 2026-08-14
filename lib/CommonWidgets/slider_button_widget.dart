@@ -51,7 +51,11 @@ class SliderButtonWidget extends StatelessWidget {
         margin: margin ?? const EdgeInsets.all(0),
         height: height ?? 50,
         decoration: BoxDecoration(
-            color: backgroundColor ?? AppColors.greenColor,
+            // Brand orange default, matching ButtonWidget. The only caller
+            // ("At Pickup") passes appColor explicitly, so this was not visibly
+            // wrong — but a green default in an orange app is the same trap that
+            // turned the primary buttons green.
+            color: backgroundColor ?? AppColors.appColor,
             borderRadius: borderRadius ?? BorderRadius.circular(20),
             border: border
         ),

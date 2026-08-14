@@ -151,6 +151,7 @@ class ApiUrls {
 
   // Vehicle Referral
   static String vehicleApplyReferralUrl(String vehicleId) => "$baseUrlApi/driver/app/my-vehicles/$vehicleId/apply-referral";
+  static String vehicleApplyCouponUrl(String vehicleId) => "$baseUrlApi/driver/app/my-vehicles/$vehicleId/apply-coupon";
 
   // SOS / Emergency
   static String sosTriggerUrl = "$baseUrlApi/driver/app/sos/trigger";

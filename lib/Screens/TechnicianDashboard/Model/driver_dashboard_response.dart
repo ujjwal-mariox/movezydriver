@@ -169,6 +169,16 @@ class DashboardStats {
   final int upcomingServices;
   final int todaysServices;
   final double todaysEarnings;
+
+  /// Since Monday 00:00 / since the 1st, aggregated server-side over
+  /// driverEarnings. Nullable — unlike the fields above — because a server
+  /// that predates them must render as an em dash, not as a fabricated ₹0 /
+  /// 0 trips that would read as "you earned nothing this week".
+  final double? weekEarnings;
+  final int? weekTrips;
+  final double? monthEarnings;
+  final int? monthTrips;
+
   final int onGoingCount;
   final int pendingCount;
   final int completedCount;
@@ -180,6 +190,10 @@ class DashboardStats {
     required this.upcomingServices,
     required this.todaysServices,
     required this.todaysEarnings,
+    required this.weekEarnings,
+    required this.weekTrips,
+    required this.monthEarnings,
+    required this.monthTrips,
     required this.onGoingCount,
     required this.pendingCount,
     required this.completedCount,
@@ -193,6 +207,16 @@ class DashboardStats {
       upcomingServices: _toInt(json['upcomingServices']),
       todaysServices: _toInt(json['todaysServices']),
       todaysEarnings: _toDouble(json['todaysEarnings']),
+      // containsKey, not a null-coalesced parse: the coercers turn an absent
+      // key into 0, which is indistinguishable from a real quiet week.
+      weekEarnings:
+          json.containsKey('weekEarnings') ? _toDouble(json['weekEarnings']) : null,
+      weekTrips: json.containsKey('weekTrips') ? _toInt(json['weekTrips']) : null,
+      monthEarnings: json.containsKey('monthEarnings')
+          ? _toDouble(json['monthEarnings'])
+          : null,
+      monthTrips:
+          json.containsKey('monthTrips') ? _toInt(json['monthTrips']) : null,
       onGoingCount: _toInt(json['onGoingCount']),
       pendingCount: _toInt(json['pendingCount']),
       completedCount: _toInt(json['completedCount']),

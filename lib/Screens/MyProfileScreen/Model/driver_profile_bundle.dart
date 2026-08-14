@@ -18,6 +18,17 @@ class DriverProfileBundle {
   final DriverLicenseInfo license;
   final bool isKycVerified;
 
+  /// Mandatory training finished. Resolved server-side against the mandatory
+  /// catalogue (GET /driver/profile -> training.complete) because completeness
+  /// cannot be judged from the driver document alone.
+  final bool trainingComplete;
+
+  /// True once the driver has ticked "I have read and understood" and the
+  /// acknowledgement was stored (driver.instructionsAcknowledgedAt). The field
+  /// was written but never returned, so the profile could not tell whether the
+  /// instructions had been read and kept inviting the driver to read them again.
+  final bool instructionsAcknowledged;
+
   DriverProfileBundle({
     required this.id,
     required this.fullName,
@@ -37,6 +48,8 @@ class DriverProfileBundle {
     required this.stats,
     required this.license,
     required this.isKycVerified,
+    this.trainingComplete = false,
+    this.instructionsAcknowledged = false,
   });
 
   DriverProfileBundle copyWith({
@@ -61,6 +74,8 @@ class DriverProfileBundle {
       stats: stats,
       license: license,
       isKycVerified: isKycVerified,
+      trainingComplete: trainingComplete,
+      instructionsAcknowledged: instructionsAcknowledged,
     );
   }
 
@@ -107,6 +122,16 @@ class DriverProfileBundle {
         expiryDate: drivingLicense['expiryDate']?.toString() ?? '',
       ),
       isKycVerified: _toBool(kyc['isVerified']),
+      // GET /driver/profile resolves training completeness against the mandatory
+      // catalogue and reports the instructions acknowledgement as a flag.
+      trainingComplete: _toBool(
+        Map<String, dynamic>.from(
+          (profileData['training'] ?? {}) as Map,
+        )['complete'],
+      ),
+      instructionsAcknowledged:
+          _toBool(profileData['instructionsAcknowledged']) ||
+              (profileData['instructionsAcknowledgedAt'] != null),
     );
   }
 }

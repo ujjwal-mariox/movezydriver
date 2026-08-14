@@ -324,6 +324,47 @@ class DashboardApiService {
     }
   }
 
+  /// The driver's COMPLETED trips, newest first, for the Earnings screen.
+  ///
+  /// Reuses the existing history route with `status=COMPLETED` rather than
+  /// inventing an endpoint. That route returns the RAW booking documents (it is
+  /// the one driver route that does not run them through mapDashboardBooking),
+  /// so callers read `driverEarnings` / `completedAt` / `bookingNumber` straight
+  /// off the map. `driverEarnings` is the settlement frozen at completion —
+  /// never substitute finalFare, which is the customer's gross.
+  ///
+  /// The server pages by `createdAt` desc, so this is "the N most recently
+  /// created completed trips", not a period total — do not sum it and present
+  /// the result as one. Returns null ONLY on failure, so the caller can tell a
+  /// broken call from a driver who has completed nothing yet.
+  Future<({List<Map<String, dynamic>> bookings, int total})?> fetchCompletedTrips({
+    int limit = 30,
+  }) async {
+    try {
+      final response = await http.get(
+        Uri.parse(
+            '${ApiUrls.driverBookingHistoryUrl}?page=1&limit=$limit&status=COMPLETED'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 30));
+      if (response.statusCode != 200) return null;
+      final data = json.decode(response.body);
+      if (data is! Map<String, dynamic>) return null;
+      final inner = data['data'];
+      if (inner is! Map<String, dynamic>) return null;
+      final raw = inner['bookings'];
+      final bookings = <Map<String, dynamic>>[
+        if (raw is List)
+          for (final b in raw)
+            if (b is Map<String, dynamic>) b,
+      ];
+      final total =
+          inner['total'] is num ? (inner['total'] as num).toInt() : bookings.length;
+      return (bookings: bookings, total: total);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// The bonuses actually awarded to this driver (the ledger behind the
   /// "Incentives Unlocked" aggregate on the Awards screen), newest first.
   ///

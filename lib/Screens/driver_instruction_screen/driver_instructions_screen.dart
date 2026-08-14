@@ -244,7 +244,6 @@ class InstructionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cardColor = Colors.white;
-    final iconBg = const Color(0xFFEAF1FF);
     final iconColor = const Color(0xFF2F6BED);
 
     return Container(
@@ -263,9 +262,7 @@ class InstructionCard extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Center(
-              child: Text(item.icon, style: const TextStyle(fontSize: 28)),
-            ),
+            child: Center(child: _icon(iconColor)),
           ),
 
           const SizedBox(width: 14),
@@ -285,6 +282,32 @@ class InstructionCard extends StatelessWidget {
         ],
       ),
     );
+  }
+  /// The design's line icons, chosen by the semantic key stored on the record.
+  ///
+  /// The card used to render `item.icon` as raw TEXT, so it could only ever show
+  /// an emoji — the seeded record held "🚕" and the design's blue clock / car /
+  /// parcel / card / phone glyphs were unreachable. Admins can still type an
+  /// emoji (the field is free text in the admin panel), so anything unrecognised
+  /// falls through to rendering it as text rather than vanishing.
+  static const Map<String, IconData> _glyphs = {
+    'clock': Icons.access_time,
+    'time': Icons.access_time,
+    'vehicle': Icons.directions_car,
+    'car': Icons.directions_car,
+    'parcel': Icons.inventory_2,
+    'package': Icons.inventory_2,
+    'payment': Icons.credit_card,
+    'cashless': Icons.credit_card,
+    'call': Icons.phone,
+    'phone': Icons.phone,
+  };
+
+  Widget _icon(Color color) {
+    final glyph = _glyphs[item.icon.trim().toLowerCase()];
+    if (glyph != null) return Icon(glyph, size: 26, color: color);
+    // Not a known key — show whatever the admin entered (usually an emoji).
+    return Text(item.icon, style: const TextStyle(fontSize: 26));
   }
 }
 

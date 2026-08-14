@@ -29,6 +29,8 @@ class MyVehiclesScreen extends StatefulWidget {
 class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
   final _apiService = MyVehiclesApiService();
   final _referralController = TextEditingController();
+  final _couponController = TextEditingController();
+  String? _applyingCouponVehicleId;
   late Razorpay _razorpay;
 
   List<VehicleItem> _vehicles = [];
@@ -54,6 +56,7 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
   void dispose() {
     _razorpay.clear();
     _referralController.dispose();
+    _couponController.dispose();
     super.dispose();
   }
 
@@ -99,12 +102,14 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
     return count * _feePerVehicle;
   }
 
-  /// Calculate total discount from referrals
+  /// Total discount from referrals AND onboarding coupons, per vehicle capped
+  /// at the fee (matching the server's math exactly).
   num get _totalDiscount {
     num discount = 0;
     for (var v in _vehicles) {
-      if (v.onboardingFeePaid != true && v.referralDiscount != null) {
-        discount += v.referralDiscount!;
+      if (v.onboardingFeePaid != true) {
+        final d = (v.referralDiscount ?? 0) + (v.couponDiscount ?? 0);
+        discount += d > _feePerVehicle ? _feePerVehicle : d;
       }
     }
     return discount;
@@ -131,6 +136,19 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
 
     try {
       final data = await _apiService.initiatePayment(unpaidIds);
+
+      // Full waiver (100% coupon): there is no Razorpay order to open — the
+      // server has already marked the vehicles paid.
+      if (data['waived'] == true) {
+        Fluttertoast.showToast(msg: 'payment_success'.tr);
+        await _fetchVehicles();
+        if (widget.isOnboarding && _allVehiclesPaid && mounted) {
+          replaceRoute(context, VerificationScreen());
+        }
+        setState(() => _payingVehicleIds = []);
+        return;
+      }
+
       final returnedIds = (data['vehicleIds'] as List?)?.cast<String>();
       if (returnedIds != null && returnedIds.isNotEmpty) {
         _payingVehicleIds = returnedIds;
@@ -195,6 +213,31 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
   }
 
   // ─── Referral Flow ───
+
+  Future<void> _applyCoupon() async {
+    final code = _couponController.text.trim();
+    if (code.isEmpty) return;
+
+    final vehicle = _firstUnpaidVehicle;
+    if (vehicle == null || vehicle.id == null) return;
+
+    setState(() => _applyingCouponVehicleId = vehicle.id);
+
+    try {
+      await _apiService.applyCoupon(
+        vehicleId: vehicle.id!,
+        couponCode: code,
+      );
+
+      Fluttertoast.showToast(msg: 'coupon_applied'.tr);
+      _couponController.clear();
+      await _fetchVehicles();
+    } catch (e) {
+      Fluttertoast.showToast(msg: e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      setState(() => _applyingCouponVehicleId = null);
+    }
+  }
 
   Future<void> _applyReferral() async {
     final code = _referralController.text.trim();
@@ -336,6 +379,42 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
                                 ? '...'
                                 : 'verify_onboard'.tr,
                             backgroundColor: HexColor('#35B255'),
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          // ─── Coupon Code Input (admin-created; can waive
+                          // the fee entirely) ───
+                          Container(
+                            height: 50,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: HexColor("#BEBEBE"), width: 1.4),
+                            ),
+                            child: TextField(
+                              controller: _couponController,
+                              textCapitalization: TextCapitalization.characters,
+                              decoration: InputDecoration(
+                                hintText: 'enter_coupon_code'.tr,
+                                hintStyle: TextStyle(
+                                  color: HexColor("#BEBEBE"),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                border: InputBorder.none,
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(height: 16),
+
+                          ButtonWidget(
+                            onTap: _applyingCouponVehicleId != null ? null : _applyCoupon,
+                            borderRadius: BorderRadius.circular(8),
+                            text: _applyingCouponVehicleId != null
+                                ? '...'
+                                : 'apply_coupon'.tr,
+                            backgroundColor: AppColors.appColor,
                           ),
 
                           const SizedBox(height: 20),

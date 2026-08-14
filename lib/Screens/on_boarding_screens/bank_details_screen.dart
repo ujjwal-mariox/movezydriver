@@ -71,7 +71,10 @@ class _BankDetailsScreenState extends State<BankDetailsScreen> {
                   OnBoardingApiService().addBankDetailsApi(context, params);
                 },
                 borderRadius: BorderRadius.circular(8),
-                text: 'save_continue'.tr,
+                // The design labels this "Submit", and unlike the settings
+                // screen this first-time save really is a direct submit (no
+                // admin approval), so the existing 'submit' key is accurate.
+                text: 'submit'.tr,
                 backgroundColor: AppColors.appColor,
               ),
             ),

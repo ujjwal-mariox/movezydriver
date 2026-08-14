@@ -1,14 +1,51 @@
 import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/CommonWidgets/app_bar.dart';
 import 'package:movezy_driver_app/Screens/TripSummeryPage/trip_summery_page.dart';
-import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
-import 'package:flutter/material.dart';
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
-import 'package:get/get.dart';
-import 'package:http/http.dart' as http;
-import 'package:intl/intl.dart';
+import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
+
+/// A history tab, and the ONLY booking statuses that tab can ever contain.
+///
+/// A booking receives its `driverId` in the same write that sets its status to
+/// ASSIGNED (booking-dispatch.service.ts `handleDriverAcceptance` and both admin
+/// assign paths), and this screen's endpoint queries `{ driverId: <me> }`. So of
+/// the eight statuses in the schema enum, DRAFT and SEARCHING can never reach
+/// this screen, and CANCELLED can (cancelling keeps `driverId`).
+///
+/// "Pending" therefore cannot mean what the dashboard calls pending — that is
+/// open work with `driverId: null`, which by definition is not this driver's
+/// history. Here it means ASSIGNED: the job is this driver's but nothing has
+/// happened on it yet. Anything from DRIVER_ARRIVED onward is genuinely under
+/// way, so those are "Ongoing".
+enum _HistoryFilter {
+  all('all', <String>[]),
+  completed('completed', <String>['COMPLETED']),
+  ongoing('ongoing', <String>['DRIVER_ARRIVED', 'PICKED', 'IN_PROGRESS']),
+  pending('pending', <String>['ASSIGNED']),
+  cancelled('cancelled', <String>['CANCELLED']);
+
+  const _HistoryFilter(this.labelKey, this.statuses);
+
+  final String labelKey;
+
+  /// Empty means "no status filter at all" (every ride).
+  final List<String> statuses;
+}
+
+/// One page of the history endpoint.
+class _PageResult {
+  const _PageResult(this.bookings, this.total);
+
+  final List<dynamic> bookings;
+  final int total;
+}
 
 class TripHistoryPage extends StatefulWidget {
   const TripHistoryPage({super.key});
@@ -18,22 +55,36 @@ class TripHistoryPage extends StatefulWidget {
 }
 
 class _TripHistoryPageState extends State<TripHistoryPage> {
+  static const int _pageSize = 20;
+
+  // Status colours. Each maps to a filter bucket, so the pill colour and the
+  // chip a ride answers to always agree.
+  static const Color _blue = Color(0xFF2563EB); // under way
+  static const Color _green = Color(0xFF1F8B4C); // completed
+  static const Color _amber = Color(0xFFC77700); // accepted, not started
+  static const Color _red = Color(0xFFE02D3C); // cancelled
+  static const Color _pickupPin = Color(0xFF6C4CE0);
+  static const Color _palePeach = Color(0xFFFFEDE0);
+  static const Color _ink = Color(0xFF1B1D28);
+
   List<dynamic> _bookings = [];
   bool _loading = true;
+  bool _failed = false;
   int _page = 1;
   int _total = 0;
   bool _loadingMore = false;
+  _HistoryFilter _filter = _HistoryFilter.all;
   final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    _fetchHistory();
+    _load();
     _scrollController.addListener(() {
       if (_scrollController.position.pixels >=
               _scrollController.position.maxScrollExtent - 200 &&
           !_loadingMore &&
-          _bookings.length < _total) {
+          _canLoadMore) {
         _loadMore();
       }
     });
@@ -45,108 +96,144 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
     super.dispose();
   }
 
-  Future<void> _fetchHistory() async {
+  bool get _canLoadMore => _bookings.length < _total;
+
+  /// The chips the design draws. "Cancelled" only has a chip while it is the
+  /// active filter — it is reachable from the filter sheet, because cancelled
+  /// rides exist in this list and the design has no tab for them.
+  List<_HistoryFilter> get _visibleChips => [
+        _HistoryFilter.all,
+        _HistoryFilter.completed,
+        _HistoryFilter.ongoing,
+        _HistoryFilter.pending,
+        if (_filter == _HistoryFilter.cancelled) _HistoryFilter.cancelled,
+      ];
+
+  Future<_PageResult> _fetchPage(String? status, int page) async {
+    final uri = Uri.parse(ApiUrls.driverBookingHistoryUrl).replace(
+      queryParameters: {
+        'page': '$page',
+        'limit': '$_pageSize',
+        if (status != null) 'status': status,
+      },
+    );
+    final response = await http.get(
+      uri,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${Prefs.accessToken}',
+      },
+    );
+    if (response.statusCode != 200) {
+      throw http.ClientException('history ${response.statusCode}', uri);
+    }
+    final body = jsonDecode(response.body);
+    final data = body is Map ? (body['data'] ?? body) : null;
+    final rows = (data is Map ? data['bookings'] : null);
+    final list = rows is List ? rows : const <dynamic>[];
+    final total = (data is Map ? data['total'] : null);
+    return _PageResult(
+      List<dynamic>.from(list),
+      total is num ? total.toInt() : list.length,
+    );
+  }
+
+  /// Newest first, matching the server's own `sort({ createdAt: -1 })` so a
+  /// merged multi-status tab reads in the same order as a single-status one.
+  int _newestFirst(dynamic a, dynamic b) {
+    final da = DateTime.tryParse((a['createdAt'] ?? '').toString());
+    final db = DateTime.tryParse((b['createdAt'] ?? '').toString());
+    if (da == null && db == null) return 0;
+    if (da == null) return 1;
+    if (db == null) return -1;
+    return db.compareTo(da);
+  }
+
+  Future<void> _load({bool spinner = false}) async {
+    if (spinner) {
+      setState(() {
+        _loading = true;
+        _failed = false;
+      });
+    }
+    final statuses = _filter.statuses;
     try {
-      final response = await http.get(
-        Uri.parse('${ApiUrls.driverBookingHistoryUrl}?page=1&limit=20'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${Prefs.accessToken}',
-        },
-      );
-      if (response.statusCode == 200) {
-        final body = jsonDecode(response.body);
-        final data = body['data'] ?? body;
-        setState(() {
-          _bookings = data['bookings'] ?? [];
-          _total = data['total'] ?? 0;
-          _page = 1;
-          _loading = false;
-        });
+      List<dynamic> rows;
+      int total;
+      if (statuses.length <= 1) {
+        final res =
+            await _fetchPage(statuses.isEmpty ? null : statuses.first, 1);
+        rows = res.bookings;
+        total = res.total;
       } else {
-        setState(() => _loading = false);
+        // getBookingHistory matches `status` EXACTLY (`query.status = status`),
+        // so a tab covering several statuses has to ask once per status and
+        // merge. Only "Ongoing" does. The backend refuses to assign a driver a
+        // second booking while one is in these states, so the first page of
+        // each status is the whole bucket — hence total == rows.length, which
+        // also switches off load-more for this tab.
+        final pages =
+            await Future.wait(statuses.map((s) => _fetchPage(s, 1)));
+        rows = pages.expand((p) => p.bookings).toList()..sort(_newestFirst);
+        total = rows.length;
       }
+      if (!mounted) return;
+      setState(() {
+        _bookings = rows;
+        _total = total;
+        _page = 1;
+        _loading = false;
+        _failed = false;
+      });
     } catch (e) {
       debugPrint('Error fetching history: $e');
-      setState(() => _loading = false);
+      if (!mounted) return;
+      // A failed request and a genuinely empty history used to render the same
+      // "no trip history" line, so a dead network looked like a driver who had
+      // never worked. They are separate states now.
+      setState(() {
+        _bookings = [];
+        _total = 0;
+        _loading = false;
+        _failed = true;
+      });
     }
   }
 
   Future<void> _loadMore() async {
+    final statuses = _filter.statuses;
+    if (statuses.length > 1) return; // merged tab has no further pages
     setState(() => _loadingMore = true);
     try {
       final nextPage = _page + 1;
-      final response = await http.get(
-        Uri.parse('${ApiUrls.driverBookingHistoryUrl}?page=$nextPage&limit=20'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${Prefs.accessToken}',
-        },
+      final res = await _fetchPage(
+        statuses.isEmpty ? null : statuses.first,
+        nextPage,
       );
-      if (response.statusCode == 200) {
-        final body = jsonDecode(response.body);
-        final data = body['data'] ?? body;
-        final newBookings = data['bookings'] ?? [];
-        setState(() {
-          _bookings.addAll(newBookings);
-          _page = nextPage;
-          _loadingMore = false;
-        });
-      } else {
-        setState(() => _loadingMore = false);
-      }
+      if (!mounted) return;
+      setState(() {
+        _bookings.addAll(res.bookings);
+        _total = res.total;
+        _page = nextPage;
+        _loadingMore = false;
+      });
     } catch (e) {
+      debugPrint('Error loading more history: $e');
+      if (!mounted) return;
       setState(() => _loadingMore = false);
     }
   }
 
-  Map<String, List<dynamic>> _groupByDate() {
-    final Map<String, List<dynamic>> grouped = {};
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final yesterday = today.subtract(const Duration(days: 1));
-
-    for (final booking in _bookings) {
-      final createdAt = booking['createdAt'] ?? booking['completedAt'] ?? '';
-      DateTime? date;
-      if (createdAt is String && createdAt.isNotEmpty) {
-        date = DateTime.tryParse(createdAt)?.toLocal();
-      }
-
-      String label;
-      if (date != null) {
-        final dateOnly = DateTime(date.year, date.month, date.day);
-        if (dateOnly == today) {
-          label = 'TODAY';
-        } else if (dateOnly == yesterday) {
-          label = 'YESTERDAY';
-        } else {
-          label = DateFormat('dd MMM yyyy').format(date).toUpperCase();
-        }
-      } else {
-        label = 'UNKNOWN';
-      }
-
-      grouped.putIfAbsent(label, () => []);
-      grouped[label]!.add(booking);
-    }
-    return grouped;
+  void _applyFilter(_HistoryFilter next) {
+    if (next == _filter) return;
+    // Jump before the list is swapped for the spinner: once it is, the
+    // controller has no client to jump.
+    if (_scrollController.hasClients) _scrollController.jumpTo(0);
+    _filter = next;
+    _load(spinner: true);
   }
 
-  String _formatDistance(dynamic km) {
-    if (km == null) return '0 km';
-    final val = (km is num) ? km.toDouble() : double.tryParse(km.toString()) ?? 0;
-    return '${val.toStringAsFixed(1)} km';
-  }
-
-  String _formatDuration(dynamic minutes) {
-    if (minutes == null) return '0 min';
-    final min = (minutes is num) ? minutes.toInt() : int.tryParse(minutes.toString()) ?? 0;
-    if (min >= 60) {
-      return '${min ~/ 60}h ${min % 60}m';
-    }
-    return '$min min';
-  }
+  // ---------------------------------------------------------------- formatting
 
   double _amount(dynamic value) {
     if (value is num) return value.toDouble();
@@ -154,20 +241,44 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
   }
 
   String _formatFare(dynamic fare) {
-    if (fare == null) return '\u20B90';
+    if (fare == null) return '₹0';
     final val = _amount(fare);
     // Keep the paise when there are any. Driver earnings are the subtotal minus
     // commission and rarely land on a whole rupee; rounding them up overstated
     // what the trip actually paid.
     final pattern = val == val.roundToDouble() ? '#,##0' : '#,##0.00';
-    return '\u20B9${NumberFormat(pattern).format(val)}';
+    return '₹${NumberFormat(pattern).format(val)}';
+  }
+
+  /// "12.4 km · 45 min" — the two figures the design has no room for on the
+  /// date line. Dropped entirely rather than printed as "0 km" when absent.
+  String _metrics(dynamic km, dynamic minutes) {
+    final parts = <String>[];
+    if (km is num && km > 0) parts.add('${km.toDouble().toStringAsFixed(1)} km');
+    if (minutes is num && minutes > 0) {
+      final min = minutes.toInt();
+      parts.add(min >= 60 ? '${min ~/ 60}h ${min % 60}m' : '$min min');
+    }
+    return parts.join(' · ');
+  }
+
+  /// "Dec 11, 2025 • 10:30 AM" from the booking's own timestamp.
+  String _formatWhen(dynamic raw) {
+    final text = (raw ?? '').toString();
+    if (text.isEmpty) return '';
+    final date = DateTime.tryParse(text)?.toLocal();
+    if (date == null) return '';
+    return '${DateFormat('MMM d, yyyy').format(date)} • '
+        '${DateFormat('hh:mm a').format(date)}';
   }
 
   /// Human label for the booking's real status.
   ///
-  /// The history endpoint returns EVERY booking this driver ever touched \u2014
-  /// cancelled ones and the trip currently under way included \u2014 and the card
+  /// The history endpoint returns EVERY booking this driver ever touched —
+  /// cancelled ones and the trip currently under way included — and the card
   /// showed none of that, so a cancelled ride looked like a completed, paid one.
+  /// The label stays specific ("At pickup", "Picked up") rather than collapsing
+  /// to the tab's name; the pill's colour is what ties it to its tab.
   static const Map<String, String> _statusLabels = {
     'DRAFT': 'Scheduled',
     'SEARCHING': 'Searching',
@@ -188,34 +299,23 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
   }
 
   Color _statusColor(String status) {
-    if (status == 'COMPLETED') return const Color(0xFF1F8B4C);
-    if (status == 'CANCELLED') return const Color(0xFFE02D3C);
-    if (status.isEmpty) return Colors.grey.shade600;
-    return AppColors.appColor; // still in flight
+    switch (status) {
+      case 'COMPLETED':
+        return _green;
+      case 'CANCELLED':
+        return _red;
+      case 'ASSIGNED':
+        return _amber;
+      case 'DRIVER_ARRIVED':
+      case 'PICKED':
+      case 'IN_PROGRESS':
+        return _blue;
+      default:
+        return Colors.grey.shade600;
+    }
   }
 
-  Widget _statusChip(String status) {
-    final color = _statusColor(status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        _statusLabel(status),
-        style: TextStyle(
-            fontSize: 10.5, fontWeight: FontWeight.w700, color: color),
-      ),
-    );
-  }
-
-  String _formatTime(String? dateStr) {
-    if (dateStr == null || dateStr.isEmpty) return '';
-    final date = DateTime.tryParse(dateStr)?.toLocal();
-    if (date == null) return '';
-    return DateFormat('hh:mm a').format(date);
-  }
+  // -------------------------------------------------------------------- layout
 
   @override
   Widget build(BuildContext context) {
@@ -234,35 +334,53 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
                     onTap: () => Navigator.pop(context),
                     child: Container(
                       padding: const EdgeInsets.only(left: 16),
-                      width: 40, height: 35,
+                      width: 40,
+                      height: 35,
                       alignment: Alignment.center,
-                      child: Image.asset("assets/back_arrow.png", color: Colors.white),
+                      child: Image.asset("assets/back_arrow.png",
+                          color: Colors.white),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text('history'.tr, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+                  Text('history'.tr,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold)),
                   const Spacer(),
+                  InkWell(
+                    onTap: _openFilterSheet,
+                    child: Container(
+                      padding: const EdgeInsets.only(right: 16),
+                      width: 48,
+                      height: 35,
+                      alignment: Alignment.center,
+                      child: Image.asset(
+                        "assets/Filter.png",
+                        width: 20,
+                        height: 20,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
+          _filterChips(),
           Expanded(
             // Pull-to-refresh, as the dashboard has: a trip completed while
             // this page sat open otherwise never appeared without re-entering.
             child: _loading
-                ? Center(child: CircularProgressIndicator(color: AppColors.appColor))
+                ? Center(
+                    child:
+                        CircularProgressIndicator(color: AppColors.appColor))
                 : RefreshIndicator(
                     color: AppColors.appColor,
-                    onRefresh: _fetchHistory,
-                    child: _bookings.isEmpty
-                        ? ListView(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            children: [
-                              const SizedBox(height: 200),
-                              Center(child: Text('no_trip_history'.tr, style: const TextStyle(fontSize: 16, color: Colors.grey))),
-                            ],
-                          )
-                        : _buildList(),
+                    onRefresh: _load,
+                    child: _failed
+                        ? _errorState()
+                        : (_bookings.isEmpty ? _emptyState() : _buildList()),
                   ),
           ),
         ],
@@ -270,25 +388,133 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
     );
   }
 
-  Widget _buildList() {
-    final grouped = _groupByDate();
-    final List<Widget> children = [];
+  Widget _filterChips() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 2),
+      // Scrolls rather than wraps: the translated labels are much longer in
+      // several of the app's languages and a fixed row clipped them.
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: _visibleChips.map(_chip).toList()),
+      ),
+    );
+  }
 
-    for (final entry in grouped.entries) {
-      children.add(_buildDateHeader(entry.key));
-      for (int i = 0; i < entry.value.length; i++) {
-        children.add(_buildTripCard(entry.value[i]));
-        if (i < entry.value.length - 1) {
-          children.add(const SizedBox(height: 12));
-        }
-      }
-      children.add(const SizedBox(height: 22));
+  Widget _chip(_HistoryFilter filter) {
+    final active = filter == _filter;
+    return Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _applyFilter(filter),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+          decoration: BoxDecoration(
+            color: active ? AppColors.appColor : _palePeach,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            filter.labelKey.tr,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: active ? Colors.white : AppColors.appColor,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The header's filter glyph. It exists so the one bucket the design has no
+  /// chip for — cancelled rides, which really are in this list — is reachable.
+  void _openFilterSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE2E5EA),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text('filters'.tr,
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: _ink)),
+                const SizedBox(height: 8),
+                for (final filter in _HistoryFilter.values)
+                  InkWell(
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      _applyFilter(filter);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Row(
+                        children: [
+                          Icon(
+                            filter == _filter
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_unchecked,
+                            size: 20,
+                            color: filter == _filter
+                                ? AppColors.appColor
+                                : Colors.grey.shade400,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            filter.labelKey.tr,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: filter == _filter
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: filter == _filter ? _ink : Colors.black87,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildList() {
+    final children = <Widget>[];
+    for (int i = 0; i < _bookings.length; i++) {
+      children.add(_buildTripCard(_bookings[i]));
+      if (i < _bookings.length - 1) children.add(const SizedBox(height: 12));
     }
 
     if (_loadingMore) {
       children.add(Padding(
         padding: const EdgeInsets.all(16),
-        child: Center(child: CircularProgressIndicator(color: AppColors.appColor)),
+        child: Center(
+            child: CircularProgressIndicator(color: AppColors.appColor)),
       ));
     }
 
@@ -296,47 +522,70 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
       controller: _scrollController,
       // Always scrollable so pull-to-refresh works on a short list too.
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
       children: children,
     );
   }
 
-  Widget _buildDateHeader(String text) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 4, 0, 12),
-      child: Row(
-        children: [
-          const Expanded(child: Divider(color: Color(0xFFE2E5EA), thickness: 1, endIndent: 8)),
-          Text(
-            text,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF757E90)),
+  /// No rides. Never a sample row — an empty tab says it is empty.
+  Widget _emptyState() {
+    final filtered = _filter != _HistoryFilter.all;
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        const SizedBox(height: 130),
+        Center(
+          child: Icon(Icons.receipt_long_outlined,
+              size: 54, color: Colors.grey.shade400),
+        ),
+        const SizedBox(height: 14),
+        Center(
+          child: Text(
+            filtered ? 'no_rides_in_filter'.tr : 'no_trip_history'.tr,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 15, color: Color(0xFF757E90)),
           ),
-          const Expanded(child: Divider(color: Color(0xFFE2E5EA), thickness: 1, indent: 8)),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  /// One "icon + value" pair of the card's meta line.
-  Widget _metaChip(IconData icon, String label) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+  Widget _errorState() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       children: [
-        Icon(icon, size: 13, color: Colors.grey.shade500),
-        const SizedBox(width: 3),
-        Text(label,
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        const SizedBox(height: 130),
+        Center(
+          child:
+              Icon(Icons.cloud_off_rounded, size: 54, color: Colors.grey.shade400),
+        ),
+        const SizedBox(height: 14),
+        Center(
+          child: Text(
+            'couldnt_load_history'.tr,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 15, color: Color(0xFF757E90)),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Center(
+          child: TextButton(
+            onPressed: () => _load(spinner: true),
+            child: Text('retry'.tr,
+                style: TextStyle(
+                    color: AppColors.appColor, fontWeight: FontWeight.w700)),
+          ),
+        ),
       ],
     );
   }
 
   Widget _buildTripCard(dynamic booking) {
-    final pickupAddress = booking['pickup']?['address'] ?? '';
-    final dropAddress = booking['drop']?['address'] ?? '';
-    final distanceKm = booking['distanceKm'];
-    final durationMin = booking['durationMin'];
+    final pickupAddress = (booking['pickup']?['address'] ?? '').toString();
+    final dropAddress = (booking['drop']?['address'] ?? '').toString();
+    final metrics = _metrics(booking['distanceKm'], booking['durationMin']);
     final fare = booking['finalFare'] ?? booking['fare'] ?? 0;
-    final createdAt = booking['createdAt'] ?? '';
+    final when = _formatWhen(booking['createdAt'] ?? booking['completedAt']);
     final bookingId = booking['_id'] ?? '';
 
     final status = (booking['status'] ?? '').toString().toUpperCase();
@@ -351,9 +600,8 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
     final hasEarnings = isCompleted && earnings > 0;
 
     return InkWell(
-      onTap: () {
-        pushTo(context, TripSummeryPage(bookingId: bookingId));
-      },
+      borderRadius: BorderRadius.circular(16),
+      onTap: () => pushTo(context, TripSummeryPage(bookingId: bookingId)),
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -367,105 +615,134 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
           ],
         ),
         child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Left: pickup/drop icons with line
-              Column(
+              // Pickup + the money. A cancelled trip earned nothing, so it
+              // carries no figure at all rather than the customer's fare shown
+              // in "earnings" colours.
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SizedBox(height: 2),
-                  // Green dot (Pickup)
-                  Container(
-                    width: 14, height: 14,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF1F8B4C),
-                      shape: BoxShape.circle,
-                    ),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 1),
+                    child:
+                        Icon(Icons.location_on, size: 16, color: _pickupPin),
                   ),
-                  Container(width: 2, height: 28, color: Colors.grey.shade300),
-                  // Red dot (Drop)
-                  Container(
-                    width: 14, height: 14,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFE02D3C),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 12),
-
-              // Middle: addresses + meta
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
                       pickupAddress.isEmpty ? 'Pickup location' : pickupAddress,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: _ink,
+                      ),
                     ),
-                    const SizedBox(height: 18),
-                    Text(
-                      dropAddress.isEmpty ? 'Drop location' : dropAddress,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
-                    ),
-                    const SizedBox(height: 12),
-                    // Time & distance (smaller text). Wrap, not Row: three
-                    // pairs plus a long duration overflowed the line on
-                    // narrower screens and clipped the last one.
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 6,
-                      crossAxisAlignment: WrapCrossAlignment.center,
+                  ),
+                  if (!isCancelled) ...[
+                    const SizedBox(width: 8),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        _metaChip(Icons.schedule, _formatTime(createdAt)),
-                        _metaChip(Icons.straighten, _formatDistance(distanceKm)),
-                        _metaChip(Icons.timer_outlined, _formatDuration(durationMin)),
+                        Text(
+                          _formatFare(hasEarnings ? earnings : fare),
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            // Only a completed trip's money is the driver's.
+                            color: isCompleted
+                                ? AppColors.appColor
+                                : Colors.grey.shade600,
+                          ),
+                        ),
+                        Text(
+                          hasEarnings ? 'You earned' : 'Trip fare',
+                          style: TextStyle(
+                              fontSize: 9.5, color: Colors.grey.shade600),
+                        ),
                       ],
                     ),
                   ],
-                ),
+                ],
               ),
-
-              const SizedBox(width: 12),
-
-              // Right: real status, then the amount — but only where there IS
-              // one. A cancelled trip earned nothing, so it carries no figure
-              // at all instead of the customer's fare in "earnings" colours.
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+              const SizedBox(height: 8),
+              // Drop, with the trip's distance/duration beside the destination
+              // they belong to — the design's date line has no room for them.
+              Row(
                 children: [
-                  _statusChip(status),
-                  if (!isCancelled) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      _formatFare(hasEarnings ? earnings : fare),
+                  Icon(Icons.location_on_outlined,
+                      size: 16, color: Colors.grey.shade500),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      dropAddress.isEmpty ? 'Drop location' : dropAddress,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        // Only a completed trip's money is the driver's.
-                        color: isCompleted
-                            ? AppColors.appColor
-                            : Colors.grey.shade600,
-                      ),
+                          fontSize: 12.5, color: Colors.grey.shade600),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      hasEarnings ? 'You earned' : 'Trip fare',
-                      style:
-                          TextStyle(fontSize: 10, color: Colors.grey.shade600),
-                    ),
+                  ),
+                  if (metrics.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Text(metrics,
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade500)),
                   ],
+                ],
+              ),
+              const SizedBox(height: 11),
+              Row(
+                children: [
+                  Image.asset('assets/calendar_2.png',
+                      width: 13, height: 13, color: Colors.grey.shade500),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      when,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 11, color: Colors.grey.shade600),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _statusPill(status),
                 ],
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _statusPill(String status) {
+    final color = _statusColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            _statusLabel(status),
+            style: TextStyle(
+                fontSize: 10.5, fontWeight: FontWeight.w700, color: color),
+          ),
+        ],
       ),
     );
   }

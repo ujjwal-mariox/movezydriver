@@ -648,15 +648,10 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
         // loose constraints, which is what collapsed them.
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _actionButton(
-            label: 'Skip Booking',
-            colour: _errorRed,
-            iconOnRight: true,
-            icon: Icons.keyboard_double_arrow_left,
-            busy: _isRejecting,
-            onTap: busy ? null : _rejectBooking,
-          ),
-          const SizedBox(height: 16),
+          // Accept first and visibly larger. Skip used to sit ON TOP at the
+          // same size, so the natural first tap — reaching for the primary
+          // action — landed on Skip and silently rejected the job. The order
+          // and the size difference both push the thumb toward Accept.
           _actionButton(
             label: 'Accept Booking',
             colour: _acceptGreen,
@@ -664,6 +659,17 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
             icon: Icons.keyboard_double_arrow_right,
             busy: _isAccepting,
             onTap: busy ? null : _acceptBooking,
+            height: 58,
+          ),
+          const SizedBox(height: 12),
+          _actionButton(
+            label: 'Skip Booking',
+            colour: _errorRed,
+            iconOnRight: true,
+            icon: Icons.keyboard_double_arrow_left,
+            busy: _isRejecting,
+            onTap: busy ? null : _rejectBooking,
+            height: 42,
           ),
         ],
       ),
@@ -677,10 +683,14 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
     required IconData icon,
     required bool busy,
     required VoidCallback? onTap,
+    // Accept renders taller than Skip so the primary action is the easier
+    // target; the chip scales with the bar so it never overflows the 42px Skip.
+    double height = 48,
   }) {
+    final chipH = height - 6;
     final chip = Container(
       width: 56,
-      height: 44,
+      height: chipH,
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
@@ -695,7 +705,7 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
         borderRadius: BorderRadius.circular(12),
         child: Container(
           width: double.infinity,
-          height: 48,
+          height: height,
           decoration: BoxDecoration(
             color: colour,
             borderRadius: BorderRadius.circular(12),
@@ -725,7 +735,7 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
                 child: busy
                     ? SizedBox(
                         width: 56,
-                        height: 44,
+                        height: chipH,
                         child: Center(
                           child: SizedBox(
                             width: 20,

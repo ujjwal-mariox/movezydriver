@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/CommonWidgets/app_bar.dart';
 import 'package:movezy_driver_app/Screens/AwardsScreen/awards_screen.dart';
+import 'package:movezy_driver_app/Screens/EarningsScreen/earnings_screen.dart';
 import 'package:movezy_driver_app/Screens/BankDetailsScreen/bank_details_settings_screen.dart';
 import 'package:movezy_driver_app/Screens/DriverProfileApp/driver_profile_screen.dart';
 import 'package:movezy_driver_app/Screens/FaqScreen/faq_screen.dart';
@@ -333,6 +334,12 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
       child: ListView(
         padding: const EdgeInsets.only(top: 0, bottom: 40),
         children: [
+          // Earnings sits above the wallet: the wallet answers "what can I
+          // withdraw", this answers "what have I earned and from what".
+          _buildListTile('Earnings', 'assets/moneys.png', () {
+            pushTo(context, const EarningsScreen());
+          }, AppColors.appColor),
+          _divider(),
           _buildListTile('history'.tr, 'assets/clock.png', () {
             pushTo(context, const TripHistoryPage());
           }, AppColors.appColor),
@@ -359,7 +366,10 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
           _divider(),
           _buildListTile('training'.tr, 'assets/training.png', () {
             pushTo(context, const TrainingScreen());
-          }, null),
+          }, null,
+              trailing: (_profile?.trainingComplete ?? false)
+                  ? _doneBadge('Completed')
+                  : null),
           _divider(),
           _buildListTile('help'.tr, 'assets/message_question.png', () {
             pushTo(context, const HelpSupportScreen());
@@ -379,7 +389,10 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
           _divider(),
           _buildListTile('driver_instructions'.tr, 'assets/task_square.png', () {
             pushTo(context, const DriverInstructionsScreen());
-          }, AppColors.appColor),
+          }, AppColors.appColor,
+              trailing: (_profile?.instructionsAcknowledged ?? false)
+                  ? _doneBadge('Read')
+                  : null),
           _divider(),
           ListTile(
             onTap: () async {
@@ -443,6 +456,46 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                 ),
               ),
       ),
+    );
+  }
+
+  /// Green "Completed" / "Read" pill for a one-off task that is already done.
+  ///
+  /// Training and Driver Instructions are both things a driver does ONCE, but
+  /// the rows looked identical whether or not they had been done — so a driver
+  /// had no way to tell, and would open them again to check. The state was on
+  /// the server the whole time (mandatory-training progress, and
+  /// instructionsAcknowledgedAt); it simply was not surfaced.
+  Widget _doneBadge(String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE8F6EC),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_circle,
+                  size: 13, color: Color(0xFF1E9E52)),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1E9E52),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 6),
+        Icon(Icons.arrow_forward_ios, color: HexColor('#6B7280'), size: 16),
+      ],
     );
   }
 

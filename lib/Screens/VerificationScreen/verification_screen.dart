@@ -112,28 +112,8 @@ class _VerificationScreenState extends State<VerificationScreen>
             ),
           ),
 
-          // Grey banner area
-          Container(
-            width: 312,
-            height: 136,
-            margin: const EdgeInsets.only(top: 3),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF5F5F5),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Center(
-              child: Image.asset(
-                'assets/app_icon.png',
-                height: 80,
-                errorBuilder: (_, __, ___) => Icon(
-                  Icons.local_shipping,
-                  size: 60,
-                  color: AppColors.appColor,
-                ),
-              ),
-            ),
-          ),
-
+          // The design goes straight from the header to the gears; a 136px grey
+          // panel holding the app icon used to sit here.
           const Spacer(flex: 2),
 
           // Animated gears
@@ -190,7 +170,19 @@ class _VerificationScreenState extends State<VerificationScreen>
                   ),
                 ),
                 const SizedBox(width: 6),
-                Icon(Icons.info_outline, size: 20, color: Colors.grey.shade500),
+                // The design draws this icon and only one button. It used to be
+                // decorative while a whole second button carried the per-document
+                // status sheet; wiring it here keeps that feature reachable
+                // without the extra button the design does not have.
+                InkWell(
+                  onTap: () => _showApplicationStatusSheet(context),
+                  customBorder: const CircleBorder(),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(Icons.info_outline,
+                        size: 20, color: Colors.grey.shade500),
+                  ),
+                ),
               ],
             ),
           ),
@@ -211,28 +203,17 @@ class _VerificationScreenState extends State<VerificationScreen>
             ),
           ),
 
-          const SizedBox(height: 24),
-
-          // Verification timeline (12–24 hrs)
-          _buildTimeline(),
-
+          // The design has no timeline card between the subtitle and the
+          // button, so the 12-24hr card that used to sit here is gone.
           const Spacer(flex: 2),
 
-          // Track Application Status button
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 22),
-            child: ButtonWidget(
-              onTap: () => _showApplicationStatusSheet(context),
-              borderRadius: BorderRadius.circular(12),
-              text: 'track_application_status'.tr,
-              backgroundColor: AppColors.appColor,
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          // Chat with Staff button (secondary).
-          // Must open the support TICKET system, not ChatScreen: that is the
+          // A single filled orange "Chat with Staff" button, as the design
+          // draws it. There used to be two stacked buttons — an orange "Track
+          // Application Status" above an outlined "Chat with Staff" — plus a
+          // 121px grey filler block below them. The status sheet now opens from
+          // the info icon beside the heading, so nothing was lost.
+          //
+          // Opens the support TICKET system, not ChatScreen: that is the
           // driver<->customer booking chat and needs a real booking ObjectId.
           // Passing 'support' threw on the server, so messages were never stored.
           Padding(
@@ -241,23 +222,11 @@ class _VerificationScreenState extends State<VerificationScreen>
               onTap: () => pushTo(context, const SupportTicketsScreen()),
               borderRadius: BorderRadius.circular(12),
               text: 'chat_with_staff'.tr,
-              backgroundColor: Colors.transparent,
-              textStyle: TextStyle(
-                color: AppColors.appColor,
-                fontWeight: FontWeight.w600,
-              ),
-              border: Border.all(color: AppColors.appColor, width: 1.4),
+              backgroundColor: AppColors.appColor,
             ),
           ),
 
-          const SizedBox(height: 24),
-
-          // Bottom grey area
-          Container(
-            width: double.infinity,
-            height: 121,
-            color: const Color(0xFFF5F5F5),
-          ),
+          const SizedBox(height: 28),
                 ],
               ),
             ),
@@ -283,154 +252,8 @@ class _VerificationScreenState extends State<VerificationScreen>
     );
   }
 
-  Widget _buildTimeline() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 22),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE6ECF2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.schedule, size: 18, color: AppColors.appColor),
-              const SizedBox(width: 8),
-              Text(
-                'verification_eta'.tr,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.black87,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _buildTimelineStep(
-            label: 'timeline_submitted'.tr,
-            sub: 'timeline_submitted_sub'.tr,
-            state: _TimelineState.done,
-            isFirst: true,
-          ),
-          _buildTimelineStep(
-            label: 'timeline_under_review'.tr,
-            sub: 'timeline_under_review_sub'.tr,
-            state: _TimelineState.active,
-          ),
-          _buildTimelineStep(
-            label: 'timeline_approved'.tr,
-            sub: 'timeline_approved_sub'.tr,
-            state: _TimelineState.pending,
-            isLast: true,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTimelineStep({
-    required String label,
-    required String sub,
-    required _TimelineState state,
-    bool isFirst = false,
-    bool isLast = false,
-  }) {
-    final Color dotColor;
-    final Widget dotChild;
-    switch (state) {
-      case _TimelineState.done:
-        dotColor = const Color(0xFF2ECC71);
-        dotChild = const Icon(Icons.check, size: 14, color: Colors.white);
-        break;
-      case _TimelineState.active:
-        dotColor = AppColors.appColor;
-        dotChild = const SizedBox(
-          width: 10,
-          height: 10,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-          ),
-        );
-        break;
-      case _TimelineState.pending:
-        dotColor = const Color(0xFFD1D8E0);
-        dotChild = const SizedBox.shrink();
-        break;
-    }
-
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 22,
-            child: Column(
-              children: [
-                Container(
-                  width: 4,
-                  height: 6,
-                  color: isFirst ? Colors.transparent : const Color(0xFFD1D8E0),
-                ),
-                Container(
-                  width: 22,
-                  height: 22,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: dotColor,
-                    shape: BoxShape.circle,
-                  ),
-                  child: dotChild,
-                ),
-                Expanded(
-                  child: Container(
-                    width: 4,
-                    color: isLast ? Colors.transparent : const Color(0xFFD1D8E0),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(top: 6, bottom: isLast ? 0 : 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: state == _TimelineState.pending
-                          ? Colors.grey.shade500
-                          : Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    sub,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey.shade600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
-enum _TimelineState { done, active, pending }
 
 class _ApplicationStatusSheet extends StatefulWidget {
   const _ApplicationStatusSheet();
