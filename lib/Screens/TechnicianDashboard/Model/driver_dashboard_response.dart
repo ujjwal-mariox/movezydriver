@@ -298,6 +298,11 @@ class DashboardBooking {
   final String customerName;
   final String vehicleTypeName;
   final String vehicleTypeIcon;
+
+  /// When this driver's dispatch offer lapses, from the server's persisted
+  /// offer row. Null when no live offer exists — and then NO countdown is
+  /// shown, never an invented one.
+  final DateTime? offerExpiresAt;
   final String paymentMethod;
   final String goodsType;
   final String goodsDescription;
@@ -328,6 +333,7 @@ class DashboardBooking {
     required this.baseFare,
     required this.addonTotal,
     required this.customerName,
+    this.offerExpiresAt,
     required this.vehicleTypeName,
     required this.vehicleTypeIcon,
     required this.paymentMethod,
@@ -364,6 +370,9 @@ class DashboardBooking {
       baseFare: _toDouble(json['baseFare']),
       addonTotal: _toDouble(json['addonTotal']),
       customerName: json['customerName']?.toString() ?? '',
+      offerExpiresAt: json['offerExpiresAt'] != null
+          ? DateTime.tryParse(json['offerExpiresAt'].toString())
+          : null,
       vehicleTypeName: json['vehicleTypeName']?.toString() ?? '',
       vehicleTypeIcon: json['vehicleTypeIcon']?.toString() ?? '',
       paymentMethod: json['paymentMethod']?.toString() ?? 'CASH',

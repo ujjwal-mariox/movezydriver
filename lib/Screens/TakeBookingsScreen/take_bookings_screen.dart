@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/Screens/BookingsDetailsScreen/bookings_details_screen.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/dashboard_api_service.dart';
@@ -48,23 +49,32 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
   bool _isAccepting = false;
   bool _isRejecting = false;
 
-  // There is deliberately no countdown here.
-  //
-  // A 30-second timer used to start when this screen opened, and at zero it
-  // called reject and told the driver "Booking declined". Both halves were
-  // wrong. The number was invented client-side: this screen is opened from the
-  // dashboard's Pending list, which the server builds from every unassigned
-  // SEARCHING/PENDING booking matching the driver's vehicle type — those rows
-  // carry no expiry and the payload has no expiry timestamp to derive one from.
-  // And nothing server-side stops a driver accepting late: acceptBooking only
-  // requires the booking to still be unassigned, so the "expired" offer the app
-  // auto-declined was still perfectly acceptable.
-  //
-  // If the payload ever starts carrying a server expiry (the dispatch socket
-  // event `booking:request` does send an `expiresAt`, but the dashboard REST
-  // payload this screen is built from does not), derive the remaining time from
-  // that. Until then the screen asserts no deadline, and it never reports a
-  // decline the driver did not make.
+  // Countdown from the SERVER's persisted offer window (offerExpiresAt on the
+  // pending payload — the very condition the old removal note set for bringing
+  // a timer back). Two rules survive from that lesson:
+  //  - no offerExpiresAt → no countdown. Never an invented number.
+  //  - at zero we say the window ended and STOP the timer — we never
+  //    auto-decline and never disable Accept, because the server still allows
+  //    accepting any booking that remains unassigned.
+  Timer? _offerTimer;
+  int? _remainingSeconds;
+  int _offerWindowTotal = 1;
+
+  void _startOfferCountdown() {
+    final expiry = booking.offerExpiresAt;
+    if (expiry == null) return;
+    _offerWindowTotal =
+        expiry.difference(DateTime.now()).inSeconds.clamp(1, 999);
+    void tick() {
+      final left = expiry.difference(DateTime.now()).inSeconds;
+      if (!mounted) return;
+      setState(() => _remainingSeconds = left > 0 ? left : 0);
+      if (left <= 0) _offerTimer?.cancel();
+    }
+
+    tick();
+    _offerTimer = Timer.periodic(const Duration(seconds: 1), (_) => tick());
+  }
 
   DashboardBooking get booking => widget.booking;
 
@@ -101,6 +111,13 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
     _loadRoadRoute();
     // Strong vibration on new order
     _vibrateNewOrder();
+    _startOfferCountdown();
+  }
+
+  @override
+  void dispose() {
+    _offerTimer?.cancel();
+    super.dispose();
   }
 
   void _vibrateNewOrder() async {
@@ -652,6 +669,46 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
           // same size, so the natural first tap — reaching for the primary
           // action — landed on Skip and silently rejected the job. The order
           // and the size difference both push the thumb toward Accept.
+          if (_remainingSeconds != null) ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _remainingSeconds! > 0
+                  ? Column(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: (_remainingSeconds! / _offerWindowTotal)
+                                .clamp(0.0, 1.0),
+                            minHeight: 5,
+                            backgroundColor: const Color(0xFFEDEDED),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              _remainingSeconds! <= 10
+                                  ? const Color(0xFFEF4444)
+                                  : _acceptGreen,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Offer window: ${_remainingSeconds}s',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: _remainingSeconds! <= 10
+                                ? const Color(0xFFEF4444)
+                                : Colors.black54,
+                          ),
+                        ),
+                      ],
+                    )
+                  : const Text(
+                      'Offer window ended — you can still accept if the job is unclaimed.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
+            ),
+          ],
           _actionButton(
             label: 'Accept Booking',
             colour: _acceptGreen,

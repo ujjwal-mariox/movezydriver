@@ -1,4 +1,6 @@
-﻿import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
+﻿import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/CommonWidgets/app_bar.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/technician_dashboard.dart';
@@ -192,7 +194,140 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
     if (ok) replaceRoute(context, const TechnicianDashboard());
   }
 
+  /// Mandatory-instruction gate: before the first trip action, fetch the
+  /// active MANDATORY instructions and require a tap-through once per trip.
+  /// The acknowledgment is persisted server-side, so the admin's per-
+  /// instruction usage stats read real data. Fail-open on network error —
+  /// a driver standing at the pickup must not be blocked from working by a
+  /// gate the server can't serve.
+  Future<bool> _ensureInstructionsAcknowledged() async {
+    try {
+      final res = await http.get(
+        Uri.parse(
+            '${ApiUrls.baseUrlApi}/driver/app/bookings/${booking.id}/instruction-gate'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${Prefs.accessToken}',
+        },
+      ).timeout(const Duration(seconds: 8));
+      final body = jsonDecode(res.body);
+      final data = body['data'] ?? {};
+      final List required = data['required'] ?? [];
+      if (data['acknowledged'] == true || required.isEmpty) return true;
+      if (!mounted) return true;
+
+      final checked = <String>{};
+      final confirmed = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setSheet) => Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Before you start',
+                    style:
+                        TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                const Text('Tap each point to confirm.',
+                    style: TextStyle(fontSize: 12.5, color: Colors.black54)),
+                const SizedBox(height: 12),
+                ...required.map((ins) {
+                  final id = (ins['_id'] ?? '').toString();
+                  final done = checked.contains(id);
+                  return InkWell(
+                    onTap: () => setSheet(() {
+                      if (done) {
+                        checked.remove(id);
+                      } else {
+                        checked.add(id);
+                      }
+                    }),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 7),
+                      child: Row(
+                        children: [
+                          Icon(
+                            done
+                                ? Icons.check_circle
+                                : Icons.radio_button_unchecked,
+                            size: 21,
+                            color: done
+                                ? const Color(0xFF22C55E)
+                                : Colors.grey.shade400,
+                          ),
+                          const SizedBox(width: 10),
+                          Text((ins['icon'] ?? '').toString(),
+                              style: const TextStyle(fontSize: 15)),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text((ins['text'] ?? '').toString(),
+                                style: const TextStyle(
+                                    fontSize: 13.5, height: 1.35)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: checked.length == required.length
+                          ? const Color(0xFF22C55E)
+                          : Colors.grey.shade300,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                    ),
+                    onPressed: checked.length == required.length
+                        ? () => Navigator.pop(ctx, true)
+                        : null,
+                    child: Text(
+                      checked.length == required.length
+                          ? 'Confirm & continue'
+                          : 'Confirm all points (${checked.length}/${required.length})',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (confirmed != true) return false;
+
+      await http.post(
+        Uri.parse(
+            '${ApiUrls.baseUrlApi}/driver/app/bookings/${booking.id}/acknowledge-instructions'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${Prefs.accessToken}',
+        },
+        body: jsonEncode({'instructionIds': checked.toList()}),
+      ).timeout(const Duration(seconds: 8));
+      return true;
+    } catch (_) {
+      // Gate unreachable — fail open, never trap a driver at the kerb.
+      return true;
+    }
+  }
+
   Future<void> _markArrived() async {
+    if (!await _ensureInstructionsAcknowledged()) return;
     setState(() => _isArriving = true);
     final resp = await _apiService.arrivedAtPickup(booking.id);
     if (!mounted) return;
