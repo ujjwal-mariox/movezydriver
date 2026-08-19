@@ -566,38 +566,11 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
                   Expanded(
                     child: _walletAction(
                       asset: 'statement',
-                      label: 'Wallet Statement',
-                      // Unfiltered, chips left on: this is the one entry point
-                      // where the driver is meant to slice the list themselves.
+                      // One entry for everything (client spec: merge Send +
+                      // Receive into a single Transactions view). The list
+                      // itself has credit/debit chips for slicing.
+                      label: 'Transactions',
                       onTap: () => pushTo(context, const TransactionsScreen()),
-                    ),
-                  ),
-                  Expanded(
-                    child: _walletAction(
-                      asset: 'send_amount',
-                      label: 'Send Amount',
-                      onTap: () => pushTo(
-                        context,
-                        const TransactionsScreen(
-                          initialFilter: TransactionFilter.debit,
-                          title: 'Send Amount',
-                          showFilters: false,
-                        ),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: _walletAction(
-                      asset: 'recieve_amount',
-                      label: 'Received Amount',
-                      onTap: () => pushTo(
-                        context,
-                        const TransactionsScreen(
-                          initialFilter: TransactionFilter.credit,
-                          title: 'Received Amount',
-                          showFilters: false,
-                        ),
-                      ),
                     ),
                   ),
                 ],

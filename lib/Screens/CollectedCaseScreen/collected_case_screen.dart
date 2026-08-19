@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:get/get.dart';
+import 'package:movezy_driver_app/Utils/OfflineStorage/offline_service.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/Screens/CollectedCaseScreen/show_fare_calculation_sheet.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/technician_dashboard.dart';
@@ -766,7 +769,50 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
 
     final complete = await _apiService.completeTrip(widget.bookingId,
         deliveryOtp: deliveryOtp);
-    final completeOk = complete != null && (complete['code'] == 1 || complete['code'] == 200);
+
+    // NETWORK failure vs server refusal, and they must be treated differently:
+    // a null response means the request never reached the server (offline,
+    // timeout) — the trip is genuinely done in the real world, so save it
+    // locally and let OfflineService replay it when the network returns. A
+    // non-null refusal (bad OTP, wrong state) must NEVER be stored as
+    // completed — replaying a rejection forever can't fix it.
+    if (complete == null) {
+      final connectivity = await Connectivity().checkConnectivity();
+      final offline = connectivity.contains(ConnectivityResult.none);
+      if (offline && Get.isRegistered<OfflineService>()) {
+        final saved = await Get.find<OfflineService>().storeTripCompletion(
+          TripCompletionData(
+            tripId: widget.bookingId,
+            driverId: Prefs.getString('driverId'),
+            completedAt: DateTime.now(),
+            fare: (_booking?['finalFare'] as num?)?.toDouble() ?? 0,
+            paymentMode: _booking?['paymentMethod']?.toString() ?? '',
+            deliveryOtp: deliveryOtp,
+            owesCash: _owesCash,
+            needsStart: status == 'PICKED',
+          ),
+        );
+        if (!mounted) return saved;
+        setState(() => _completing = false);
+        if (saved) {
+          Fluttertoast.showToast(
+              msg:
+                  'No internet — trip saved on this phone and will sync automatically.',
+              toastLength: Toast.LENGTH_LONG);
+          Navigator.pop(context, true);
+          return true;
+        }
+      }
+      // Reachable network but the call still failed — transient. Say what is
+      // actually happening instead of a generic failure.
+      _completeError = 'Network issue detected. Please try again.';
+      if (!mounted) return false;
+      setState(() => _completing = false);
+      if (deliveryOtp == null) Fluttertoast.showToast(msg: _completeError!);
+      return false;
+    }
+
+    final completeOk = complete['code'] == 1 || complete['code'] == 200;
     if (!completeOk) {
       final raw = complete?['message']?.toString();
       // The server refuses COMPLETE while any intermediate drop is unmarked.

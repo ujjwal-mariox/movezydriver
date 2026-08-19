@@ -1,12 +1,12 @@
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:hexcolor/hexcolor.dart';
 import 'package:intl/intl.dart';
+import 'package:movezy_driver_app/Utils/OfflineStorage/offline_service.dart';
 import 'package:movezy_driver_app/Services/booking_alert_service.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/Screens/MyProfileScreen/my_profile_screen.dart';
@@ -16,7 +16,6 @@ import 'package:movezy_driver_app/Screens/BookingsDetailsScreen/bookings_details
 import 'package:movezy_driver_app/Screens/EarningsScreen/earnings_screen.dart';
 import 'package:movezy_driver_app/Screens/VerifyRideScreen/verify_ride_screen.dart';
 import 'package:movezy_driver_app/Screens/CollectedCaseScreen/collected_case_screen.dart';
-import 'package:movezy_driver_app/Screens/TechnicianDashboard/driver_reviews_service.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/driver_reviews_screen.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/Model/driver_dashboard_response.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/dashboard_api_service.dart';
@@ -49,7 +48,6 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
   // What customers said about this driver. The design has a Reviews section
   // here, but nothing ever read the ratings back out of the bookings they were
   // written to, so the driver could never see a single one.
-  DriverReviewsResult? _reviews;
 
   // Bookings are a tabbed, swipeable carousel in the design: On Going /
   // Pending / Completed, with page dots beneath.
@@ -62,7 +60,6 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
   void initState() {
     super.initState();
     _loadDashboard();
-    _loadReviews();
     _connectSocket();
     // Pull the admin-configured support number once per session so any call
     // control in the app has a real value to guard on. It stays empty — and
@@ -70,15 +67,6 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     ApiUrls.loadSupportContact();
   }
 
-  Future<void> _loadReviews() async {
-    try {
-      final r = await DriverReviewsService.fetch(limit: 4);
-      if (mounted) setState(() => _reviews = r);
-    } catch (e) {
-      // Reviews are secondary — never break the dashboard over them.
-      debugPrint('reviews load failed: $e');
-    }
-  }
 
 
   /// True while the incoming-booking alert is on screen, so a burst of
@@ -462,7 +450,6 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
           // only from initState — pull-to-refresh never updated them.
           await Future.wait([
             _loadDashboard(showLoader: false),
-            _loadReviews(),
           ]);
         },
         child: SingleChildScrollView(
@@ -486,14 +473,13 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
               const SizedBox(height: 20),
               _statGrid(stats),
               const SizedBox(height: 24),
-              _monthlyRevenueChart(stats),
-              const SizedBox(height: 24),
+              // Client spec: the home screen is toggle + bookings + today's
+              // earnings + a small rating. The monthly revenue chart and the
+              // reviews list moved OFF the dashboard — earnings detail lives on
+              // the Earnings screen (the stat tile opens it) and reviews on
+              // the Reviews screen (the rating tile opens it). Both sections
+              // still exist; they just no longer weigh down the first screen.
               _bookingsSection(stats, bookings),
-              const SizedBox(height: 28),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _reviewsSection(),
-              ),
               const SizedBox(height: 24),
             ],
           ),
@@ -503,6 +489,49 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
   }
 
   // --------------------------- Header ---------------------------
+  /// Always-visible connection state (client spec). States are Online /
+  /// Offline / Syncing-N: the connectivity plugin reports transport presence,
+  /// not signal quality, so no "Weak" state is claimed — that would be a
+  /// number the device cannot actually measure.
+  Widget _networkChip() {
+    final svc = Get.isRegistered<OfflineService>() ? Get.find<OfflineService>() : null;
+    if (svc == null) return const SizedBox.shrink();
+    return Obx(() {
+      final offline = svc.isOffline.value;
+      final syncing = svc.isSyncing.value;
+      final pending = svc.pendingCount.value;
+      final String label;
+      final Color dot;
+      if (syncing) {
+        label = 'Syncing…';
+        dot = Colors.amber;
+      } else if (offline) {
+        label = pending > 0 ? 'Offline · $pending saved' : 'Offline';
+        dot = Colors.redAccent;
+      } else {
+        label = 'Online';
+        dot = const Color(0xFF7CFC9A);
+      }
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.circle, size: 7, color: dot),
+            const SizedBox(width: 4),
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      );
+    });
+  }
+
   /// Avatar, wallet balance and the online/offline toggle in one orange bar,
   /// per the design. Built locally rather than through commonAppBar: that
   /// helper is shared by 24 screens and its Stack child does not expand.
@@ -526,6 +555,8 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
             child: _avatar(driver.profilePhoto),
           ),
           const Spacer(),
+          _networkChip(),
+          const SizedBox(width: 8),
           _walletPill(wallet.balance),
           const SizedBox(width: 10),
           _statusButton(driver),
@@ -610,6 +641,10 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
         children: [
           // The only earnings figure on the dashboard, so it is the natural
           // entry point for the full Earnings breakdown.
+          _statTile('${_dashboard!.driver.rating.toStringAsFixed(1)} ★', 'Rating',
+              Icons.star_rate_rounded, onTap: () async {
+            await pushTo(context, const DriverReviewsScreen());
+          }),
           _statTile(_money.format(stats.totalEarnings), 'Total Earning',
               Icons.account_balance_wallet_outlined, onTap: () async {
             await pushTo(context, const EarningsScreen());
@@ -1032,127 +1067,6 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
   /// data was on the wire and simply never drawn. Hidden when there's nothing
   /// to show rather than rendering an empty axis.
   /// Reviews, as the design has them: header + View All, then entries with a
-  /// round photo, name, right-aligned date, a star row with the numeric score,
-  /// and the comment. Hidden entirely when there are none — an empty "Reviews"
-  /// header would just look broken.
-  Widget _reviewsSection() {
-    final r = _reviews;
-    if (r == null || r.reviews.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                const Text('Reviews',
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                const SizedBox(width: 8),
-                if (r.count > 0) ...[
-                  Icon(Icons.star_rounded,
-                      size: 16, color: AppColors.appColor),
-                  const SizedBox(width: 2),
-                  // toStringAsFixed(1): the raw double prints "4.0"/"0.0".
-                  // This aggregate is the only decimal rating that exists —
-                  // a single review's rating is a whole number of stars.
-                  Text('${r.average.toStringAsFixed(1)} (${r.count})',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey.shade600)),
-                ],
-              ],
-            ),
-            InkWell(
-              onTap: () => pushTo(context, const DriverReviewsScreen()),
-              child: Text('View All',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.appColor)),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        ...r.reviews.map(_reviewTile),
-      ],
-    );
-  }
-
-  Widget _reviewTile(DriverReview review) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _avatar(review.customerPhoto),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        review.customerName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                    if (review.ratedAt != null)
-                      Text(
-                        DateFormat('dd MMM').format(review.ratedAt!),
-                        style: TextStyle(
-                            fontSize: 11, color: Colors.grey.shade500),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    for (var i = 1; i <= 5; i++)
-                      Icon(
-                        i <= review.rating ? Icons.star : Icons.star_border,
-                        size: 13,
-                        color: AppColors.appColor,
-                      ),
-                    const SizedBox(width: 6),
-                    Text('${review.rating}',
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey.shade700)),
-                  ],
-                ),
-                if (review.comment.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    review.comment,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 12, color: Colors.grey.shade700, height: 1.4),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   /// A 1/2/5 x 10^n step, so four gridlines land on round numbers whatever the
   /// driver actually earns.
@@ -1165,133 +1079,6 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     return nice * mag;
   }
 
-  Widget _monthlyRevenueChart(DashboardStats stats) {
-    final points = stats.monthlyRevenue;
-    if (points.isEmpty || points.every((p) => p.amount <= 0)) {
-      return const SizedBox.shrink();
-    }
-
-    final maxY = points.map((p) => p.amount).reduce((a, b) => a > b ? a : b);
-    // Head-room so bars don't touch the ceiling, then rounded up to a tidy
-    // step so the gridlines read as round numbers (the design shows
-    // 0/5000/10000/15000). The step is derived from the driver's real revenue,
-    // never hardcoded — a driver earning 800/month must not get a 15k axis.
-    final headroom = maxY <= 0 ? 1.0 : maxY * 1.2;
-    final step = _axisStep(headroom);
-    final top = (headroom / step).ceil() * step;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: HexColor("#E6EEF2")),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Centered, with the unit appended. The word "Rupee" is not
-            // hardcoded — 'monthly_revenue' is translated into 11 languages.
-            Center(
-              child: Text(
-                '${'monthly_revenue'.tr} (₹)',
-                style:
-                    const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700),
-              ),
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 150,
-              child: BarChart(
-                BarChartData(
-                  maxY: top,
-                  alignment: BarChartAlignment.spaceAround,
-                  borderData: FlBorderData(show: false),
-                  gridData: FlGridData(
-                    show: true,
-                    drawVerticalLine: false,
-                    horizontalInterval: step,
-                    getDrawingHorizontalLine: (_) =>
-                        FlLine(color: HexColor("#EEF2F5"), strokeWidth: 1),
-                  ),
-                  titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false)),
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 40,
-                        interval: step,
-                        getTitlesWidget: (value, meta) {
-                          if (value == 0) return const SizedBox.shrink();
-                          final k = value >= 1000
-                              ? '${(value / 1000).toStringAsFixed(0)}k'
-                              : value.toStringAsFixed(0);
-                          return Text(k,
-                              style: TextStyle(
-                                  fontSize: 10, color: HexColor("#8B95A1")));
-                        },
-                      ),
-                    ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 24,
-                        getTitlesWidget: (value, meta) {
-                          final i = value.toInt();
-                          if (i < 0 || i >= points.length) {
-                            return const SizedBox.shrink();
-                          }
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              points[i].month,
-                              style: TextStyle(
-                                  fontSize: 10, color: HexColor("#8B95A1")),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  barTouchData: BarTouchData(
-                    touchTooltipData: BarTouchTooltipData(
-                      getTooltipItem: (group, _, rod, _) => BarTooltipItem(
-                        '${points[group.x].month}\n${_money.format(rod.toY)}',
-                        const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ),
-                  barGroups: [
-                    for (var i = 0; i < points.length; i++)
-                      BarChartGroupData(
-                        x: i,
-                        barRods: [
-                          BarChartRodData(
-                            toY: points[i].amount,
-                            width: 14,
-                            color: AppColors.appColor,
-                            borderRadius: const BorderRadius.vertical(
-                                top: Radius.circular(4)),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _avatar(String imageUrl) {
     final url = imageUrl.trim();

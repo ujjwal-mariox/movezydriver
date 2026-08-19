@@ -1,4 +1,8 @@
 import 'dart:async';
+import 'dart:convert' as convert;
+import 'package:http/http.dart' as http_client;
+import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
+import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -144,18 +148,65 @@ class OfflineService extends GetxService {
     }
   }
 
+  /// Replay a locally-saved completion against the real endpoints, in the
+  /// same order the live screen uses: start (if the trip was still PICKED),
+  /// complete (with the delivery OTP the driver already entered), then cash
+  /// collection for COD. Returns true ONLY on a server-confirmed completion —
+  /// the previous placeholder returned true after a fake delay, which would
+  /// have deleted saved trips without the server ever hearing about them.
   Future<bool> _syncTrip(TripCompletionData data) async {
-    // TODO: Implement actual API call to sync trip
-    // This is a placeholder - integrate with your backend API
-    await Future.delayed(const Duration(milliseconds: 500));
-    return true;
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${Prefs.accessToken}',
+      };
+
+      if (data.needsStart) {
+        await http_client
+            .post(Uri.parse(ApiUrls.driverStartTripUrl(data.tripId)),
+                headers: headers)
+            .timeout(const Duration(seconds: 20));
+      }
+
+      final res = await http_client
+          .post(
+            Uri.parse(ApiUrls.driverCompleteTripUrl(data.tripId)),
+            headers: headers,
+            body: data.deliveryOtp == null
+                ? null
+                : convert.jsonEncode({'otp': data.deliveryOtp}),
+          )
+          .timeout(const Duration(seconds: 20));
+      final body = convert.jsonDecode(res.body);
+      final code = body is Map ? body['code'] : null;
+      final already = body is Map &&
+          body['message']?.toString() == 'booking_already_completed';
+      if (code != 1 && code != 200 && !already) {
+        // A server REFUSAL (bad OTP, wrong state) is terminal for auto-sync —
+        // retrying forever cannot fix it. Keep it stored so it stays visible
+        // in the pending count rather than vanishing.
+        print('Offline trip ${data.tripId} refused by server: ${body is Map ? body['message'] : res.statusCode}');
+        return false;
+      }
+
+      if (data.owesCash) {
+        await http_client
+            .post(Uri.parse(ApiUrls.driverCollectCashUrl(data.tripId)),
+                headers: headers)
+            .timeout(const Duration(seconds: 20));
+      }
+      return true;
+    } catch (e) {
+      print('Offline trip sync failed (will retry): $e');
+      return false;
+    }
   }
 
   Future<bool> _syncDocument(DocumentUploadData data) async {
-    // TODO: Implement actual API call to sync document
-    // This is a placeholder - integrate with your backend API
-    await Future.delayed(const Duration(milliseconds: 500));
-    return true;
+    // No upload replay is implemented. Returning false keeps the record
+    // stored and visible in the pending count — the placeholder returned a
+    // fake true, which deleted the stored upload without sending anything.
+    return false;
   }
 
   /// Get list of pending trips
@@ -189,6 +240,12 @@ class TripCompletionData {
   final String paymentMode;
   final double? tipAmount;
   final String? notes;
+  /// Replay context: the delivery OTP the driver already collected, whether
+  /// COD cash still has to be marked collected, and whether the trip was
+  /// still PICKED (so start must be called before complete).
+  final String? deliveryOtp;
+  final bool owesCash;
+  final bool needsStart;
 
   TripCompletionData({
     required this.tripId,
@@ -198,6 +255,9 @@ class TripCompletionData {
     required this.paymentMode,
     this.tipAmount,
     this.notes,
+      this.deliveryOtp,
+    this.owesCash = false,
+    this.needsStart = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -208,6 +268,9 @@ class TripCompletionData {
     'paymentMode': paymentMode,
     'tipAmount': tipAmount,
     'notes': notes,
+        'deliveryOtp': deliveryOtp,
+        'owesCash': owesCash,
+        'needsStart': needsStart,
   };
 
   factory TripCompletionData.fromJson(Map<String, dynamic> json) {
@@ -219,6 +282,9 @@ class TripCompletionData {
       paymentMode: json['paymentMode'],
       tipAmount: json['tipAmount']?.toDouble(),
       notes: json['notes'],
+      deliveryOtp: json['deliveryOtp'] as String?,
+      owesCash: json['owesCash'] == true,
+      needsStart: json['needsStart'] == true,
     );
   }
 }
