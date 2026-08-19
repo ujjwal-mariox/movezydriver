@@ -256,8 +256,18 @@ class _MyBadgeScreenState extends State<MyBadgeScreen> {
     );
   }
 
+  /// Level from badges earned: Bronze 0-2, Silver 3-5, Gold 6-8, Platinum 9+.
+  /// Purely a reading of real earned counts — no invented points.
+  static ({String name, Color color}) _levelFor(int earned) {
+    if (earned >= 9) return (name: 'Platinum', color: const Color(0xFF7C6FF0));
+    if (earned >= 6) return (name: 'Gold', color: const Color(0xFFDAA520));
+    if (earned >= 3) return (name: 'Silver', color: const Color(0xFF8E9BAE));
+    return (name: 'Bronze', color: const Color(0xFFB07B4F));
+  }
+
   Widget _progressCard(int earned, int total, double percent) {
     final remaining = total - earned;
+    final level = _levelFor(earned);
     return Container(
       padding: const EdgeInsets.fromLTRB(21, 20, 18, 16),
       decoration: BoxDecoration(
@@ -277,11 +287,29 @@ class _MyBadgeScreenState extends State<MyBadgeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Your Progress',
-                    style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF323232))),
+                Row(
+                  children: [
+                    const Text('Your Progress',
+                        style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF323232))),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: level.color.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(level.name,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: level.color)),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 4),
                 Text.rich(
                   TextSpan(children: [
@@ -574,6 +602,30 @@ class _MyBadgeScreenState extends State<MyBadgeScreen> {
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 11.5, color: Colors.black87),
           ),
+          // Progress toward unlocking — the server already sends
+          // progress/progressTarget per badge; only the label was shown.
+          if (!unlocked &&
+              badge['progress'] is num &&
+              badge['progressTarget'] is num &&
+              (badge['progressTarget'] as num) > 0) ...[
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: ((badge['progress'] as num) /
+                          (badge['progressTarget'] as num))
+                      .clamp(0.0, 1.0)
+                      .toDouble(),
+                  minHeight: 4,
+                  backgroundColor: const Color(0xFFEDEDED),
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                      _categoryColor((badge['category'] ?? '').toString())),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
