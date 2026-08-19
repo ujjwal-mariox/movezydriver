@@ -469,7 +469,13 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                   if (profile.license.number.trim().isNotEmpty)
                     LicenseRow(
                       label: 'DL Number',
-                      value: profile.license.number,
+                      // Masked to the last 4 (client spec: keep sensitive data
+                      // hidden). Enough to confirm WHICH licence is on file
+                      // without exposing the full number to shoulder-surfing;
+                      // the verified badge above carries the status.
+                      value: profile.license.number.trim().length > 4
+                          ? '•••• ${profile.license.number.trim().substring(profile.license.number.trim().length - 4)}'
+                          : '••••',
                     ),
                   LicenseRow(
                     label: 'DL Expiry Date',
