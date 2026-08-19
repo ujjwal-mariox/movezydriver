@@ -72,7 +72,7 @@ class _AwardsScreenState extends State<AwardsScreen> {
             Stack(
               children: [
                 Container(
-                  height: 260,
+                  height: 232,
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [HexColor("#6234EC"), HexColor("#C371A4")],
@@ -118,7 +118,7 @@ class _AwardsScreenState extends State<AwardsScreen> {
                 ),
                 // Motivational card — real today's earnings + rating
                 Positioned(
-                  top: 120,
+                  top: 104,
                   left: 20,
                   right: 20,
                   child: Container(
@@ -174,7 +174,7 @@ class _AwardsScreenState extends State<AwardsScreen> {
               ],
             ),
 
-            const SizedBox(height: 80),
+            const SizedBox(height: 18),
 
             if (_loading)
               const Padding(
@@ -205,7 +205,7 @@ class _AwardsScreenState extends State<AwardsScreen> {
                   bonusText: (daily['achieved'] == true) ? '₹${daily['reward']} bonus unlocked!' : null,
                 ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
 
               // --- WEEKLY MILESTONE (real) ---
               if (weekly != null)
@@ -219,7 +219,7 @@ class _AwardsScreenState extends State<AwardsScreen> {
                   bonusText: (weekly['achieved'] == true) ? '₹${weekly['reward']} bonus unlocked!' : null,
                 ),
 
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
 
               // --- PEAK HOUR BONUS (real) ---
               if (peak != null)
@@ -235,7 +235,7 @@ class _AwardsScreenState extends State<AwardsScreen> {
                       : '${peak['remaining']} more for ₹${peak['reward']} extra',
                 ),
 
-              const SizedBox(height: 20),
+              const SizedBox(height: 14),
 
               // --- INCENTIVE SUMMARY (real) ---
               Container(

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:hexcolor/hexcolor.dart';
 import 'package:intl/intl.dart';
+import 'package:movezy_driver_app/Services/booking_alert_service.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/Screens/MyProfileScreen/my_profile_screen.dart';
 import 'package:movezy_driver_app/Screens/TakeBookingsScreen/take_bookings_screen.dart';
@@ -26,9 +27,7 @@ import 'package:movezy_driver_app/Screens/NotificationsScreen/notifications_scre
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
 import 'package:movezy_driver_app/Utils/CustomToast/custome_toast.dart';
 import 'package:movezy_driver_app/Utils/LocationService/location_tracking_service.dart';
-import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 class TechnicianDashboard extends StatefulWidget {
   const TechnicianDashboard({super.key});
@@ -46,7 +45,6 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
   bool _isLoading = true;
   bool _isUpdatingStatus = false;
   String _error = '';
-  IO.Socket? _socket;
 
   // What customers said about this driver. The design has a Reviews section
   // here, but nothing ever read the ratings back out of the bookings they were
@@ -85,14 +83,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
 
   /// True while the incoming-booking alert is on screen, so a burst of
   /// dispatch retries for the same job cannot stack dialogs.
-  bool _bookingAlertShowing = false;
 
-  void _dismissIncomingBookingAlert() {
-    if (_bookingAlertShowing && (Get.isDialogOpen ?? false)) {
-      Get.back();
-    }
-    _bookingAlertShowing = false;
-  }
 
   /// Full-screen offer alert, raised over WHATEVER route is on top.
   ///
@@ -101,130 +92,6 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
   /// present above pushed routes. Fields are read defensively — the payload
   /// is the dispatch service's slim shape (pickup/drop/fare/vehicle), not the
   /// full booking document.
-  void _showIncomingBookingAlert(dynamic payload) {
-    if (_bookingAlertShowing) return;
-    if (!mounted) return;
-
-    String pickupAddr = '';
-    String dropAddr = '';
-    String vehicle = '';
-    double fare = 0;
-    String bookingId = '';
-    try {
-      final map = Map<String, dynamic>.from(payload as Map);
-      bookingId = map['bookingId']?.toString() ?? '';
-      pickupAddr = (map['pickup']?['address'] ?? '').toString();
-      dropAddr = (map['drop']?['address'] ?? '').toString();
-      vehicle = (map['vehicleType'] ?? '').toString();
-      fare = (map['estimatedFare'] as num?)?.toDouble() ?? 0;
-    } catch (_) {
-      // Unparseable payload — still worth announcing; the driver can open the
-      // pending list from the dashboard.
-    }
-
-    _bookingAlertShowing = true;
-    Get.dialog(
-      Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: AppColors.appColor.withValues(alpha: 0.12),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.notifications_active,
-                        color: AppColors.appColor, size: 24),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'new_booking'.tr,
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  if (fare > 0)
-                    Text(
-                      '\u20b9${fare.toStringAsFixed(0)}',
-                      style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.appColor),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              if (pickupAddr.isNotEmpty)
-                _alertAddressRow(
-                    Icons.circle, const Color(0xFF25AA59), pickupAddr),
-              if (dropAddr.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                _alertAddressRow(
-                    Icons.location_on, const Color(0xFFE23B32), dropAddr),
-              ],
-              if (vehicle.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(vehicle,
-                    style: TextStyle(
-                        fontSize: 12.5, color: HexColor('#6B7280'))),
-              ],
-              const SizedBox(height: 18),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.appColor,
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  elevation: 0,
-                ),
-                onPressed: () => _openIncomingBooking(bookingId),
-                child: const Text('View Booking',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700)),
-              ),
-              TextButton(
-                onPressed: _dismissIncomingBookingAlert,
-                child: Text('Dismiss',
-                    style: TextStyle(color: HexColor('#6B7280'))),
-              ),
-            ],
-          ),
-        ),
-      ),
-      barrierDismissible: false,
-    ).then((_) => _bookingAlertShowing = false);
-  }
-
-  Widget _alertAddressRow(IconData icon, Color color, String text) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 2),
-          child: Icon(icon, size: 14, color: color),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(text,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, height: 1.35)),
-        ),
-      ],
-    );
-  }
-
   /// Close the alert, return to the dashboard, and open the offer if it is
   /// still available. The offer can be gone by now (taken, cancelled, timed
   /// out) — say so honestly rather than opening a dead Skip/Accept screen.
@@ -253,7 +120,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
   }
 
   Future<void> _openIncomingBooking(String bookingId) async {
-    _dismissIncomingBookingAlert();
+    BookingAlertService.instance.dismissAlert();
     // Back to the dashboard first so the pending list behind the pushed
     // screen is the fresh one.
     Get.until((route) => route.isFirst);
@@ -269,60 +136,32 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
   @override
   void dispose() {
     _pageController.dispose();
-    _socket?.disconnect();
-    _socket?.dispose();
+    // Unsubscribe only. Disconnecting here is what used to kill booking
+    // alerts app-wide whenever this screen left the stack.
+    final svc = BookingAlertService.instance;
+    svc.removeRefreshListener(_onBookingEvent);
+    if (identical(svc.openBookingHandler, _openIncomingBooking)) {
+      svc.openBookingHandler = null;
+    }
     super.dispose();
   }
 
-  /// Listen for real-time booking events via socket
+  /// Subscribe to the app-lifetime booking listener.
+  ///
+  /// The socket used to be owned by this State, so replacing the dashboard out
+  /// of the navigation stack disposed it and the driver silently stopped
+  /// receiving offers. BookingAlertService owns the connection now; this
+  /// screen only registers what it needs.
   void _connectSocket() {
-    _socket = IO.io(
-      ApiUrls.socketUrl,
-      IO.OptionBuilder()
-          .setTransports(['websocket', 'polling'])
-          .setAuth({'token': Prefs.accessToken})
-          // Own connection, so another service's dispose() cannot tear down the
-          // booking:new / booking:status listeners below. See ChatService.connect().
-          .enableForceNew()
-          .enableAutoConnect()
-          .enableReconnection()
-          .build(),
-    );
+    final svc = BookingAlertService.instance;
+    svc.connect();
+    svc.addRefreshListener(_onBookingEvent);
+    svc.openBookingHandler = _openIncomingBooking;
+  }
 
-    // A new booking is dispatched to this driver. The backend event is
-    // `booking:request` (dispatch service); the old `booking:new` listener was
-    // never emitted, so drivers never saw new jobs in real time and requests
-    // timed out while they sat on the dashboard. Refreshing pulls the job into
-    // the pending list immediately.
-    _socket!.on('booking:request', (payload) {
-      _loadDashboard(showLoader: false);
-      // Surface the offer wherever the driver is. The refresh above only
-      // updates the pending list on THIS screen, so a driver sitting on any
-      // pushed route (wallet, history, chat...) never knew a job had arrived
-      // until it had already timed out.
-      _showIncomingBookingAlert(payload);
-    });
-    // Kept for backward/admin compatibility; harmless if never fired.
-    _socket!.on('booking:new', (_) {
-      _loadDashboard(showLoader: false);
-    });
-
-    // A pending request was taken by another driver — clear the stale card.
-    _socket!.on('booking:closed', (_) {
-      _loadDashboard(showLoader: false);
-      // Another driver took it — a still-open alert now offers a dead job.
-      _dismissIncomingBookingAlert();
-    });
-
-    // The customer cancelled — refresh so the job disappears from the list.
-    _socket!.on('booking:cancelled', (_) {
-      _loadDashboard(showLoader: false);
-    });
-
-    // Refresh when booking status changes (accepted, completed, cancelled, etc.)
-    _socket!.on('booking:status', (_) {
-      _loadDashboard(showLoader: false);
-    });
+  void _onBookingEvent() {
+    if (!mounted) return;
+    _loadDashboard(showLoader: false);
   }
 
   Future<void> _loadDashboard({bool showLoader = true}) async {

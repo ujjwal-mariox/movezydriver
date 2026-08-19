@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:movezy_driver_app/Services/booking_alert_service.dart';
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/Utils/LocationService/location_tracking_service.dart';
 import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
@@ -22,6 +23,15 @@ Future<void> performDriverLogout() async {
     LocationTrackingService.instance.stopTracking();
   } catch (e) {
     debugPrint('logout: stopTracking failed: $e');
+  }
+
+  // The booking listener is app-lifetime now, so it has to be torn down here
+  // explicitly — otherwise the next driver to log in on this device inherits
+  // the previous session's socket and its offers.
+  try {
+    BookingAlertService.instance.disconnect();
+  } catch (e) {
+    debugPrint('logout: booking alert disconnect failed: $e');
   }
 
   // 2. Tell the backend to mark us offline, while the token still works.
