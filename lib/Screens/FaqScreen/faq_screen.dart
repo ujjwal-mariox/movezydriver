@@ -1,5 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
+import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/Screens/HelpSupportScreen/help_support_screen.dart';
 import 'package:movezy_driver_app/CommonWidgets/app_bar.dart';
@@ -61,6 +65,49 @@ class _FaqScreenState extends State<FaqScreen> {
     ],
   };
 
+
+  /// Admin-managed FAQs, keyed by category id, once loaded.
+  ///
+  /// The screen used to render `_faqData` only, so anything an admin wrote in
+  /// Content & Policies never reached a driver. The bundled set below is now
+  /// just the offline fallback: whatever the server returns for a category
+  /// replaces it, and a failed/empty fetch leaves the driver with the local
+  /// answers rather than an empty screen.
+  final Map<String, List<Map<String, String>>> _remoteFaqs = {};
+  final Set<String> _loadingCategories = {};
+
+  Future<void> _loadFaqs(String category) async {
+    if (_remoteFaqs.containsKey(category) ||
+        _loadingCategories.contains(category)) {
+      return;
+    }
+    _loadingCategories.add(category);
+    try {
+      final res = await http
+          .get(Uri.parse('${ApiUrls.faqsUrl}?category=$category'))
+          .timeout(const Duration(seconds: 12));
+      if (res.statusCode != 200) return;
+      final body = jsonDecode(res.body);
+      final list = (body is Map ? body['data'] : null);
+      if (list is! List) return;
+      final parsed = list
+          .whereType<Map>()
+          .map((e) => {
+                'q': (e['question'] ?? '').toString(),
+                'a': (e['answer'] ?? '').toString(),
+              })
+          .where((e) => e['q']!.isNotEmpty && e['a']!.isNotEmpty)
+          .toList();
+      // An empty server category is not an answer — keep the bundled set.
+      if (parsed.isEmpty) return;
+      if (!mounted) return;
+      setState(() => _remoteFaqs[category] = parsed);
+    } catch (e) {
+      debugPrint('FAQ fetch failed for $category: $e');
+    } finally {
+      _loadingCategories.remove(category);
+    }
+  }
 
   @override
   void dispose() {
@@ -213,7 +260,13 @@ class _FaqScreenState extends State<FaqScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       child: InkWell(
-        onTap: () => setState(() => _selectedCategory = cat['id']),
+        onTap: () {
+          final id = cat['id'] as String;
+          setState(() => _selectedCategory = id);
+          // Pull the admin-managed answers for this category; the bundled set
+          // renders immediately in the meantime.
+          _loadFaqs(id);
+        },
         borderRadius: BorderRadius.circular(14),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
@@ -248,7 +301,10 @@ class _FaqScreenState extends State<FaqScreen> {
 
   // --- FAQ LIST for selected category ---
   Widget _buildFaqList() {
-    final faqs = _faqData[_selectedCategory] ?? [];
+    // Admin-managed answers win; the bundled set is the offline fallback.
+    final faqs = _remoteFaqs[_selectedCategory] ??
+        _faqData[_selectedCategory] ??
+        const <Map<String, String>>[];
     final catInfo = _categories.firstWhere((c) => c['id'] == _selectedCategory);
 
     return SingleChildScrollView(

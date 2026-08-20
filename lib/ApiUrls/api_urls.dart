@@ -32,6 +32,11 @@ class ApiUrls {
   static String driverBankDetailsUrl = "$baseUrlApi/driver/app/bank-details";
   // Support tickets (driver) — create + list + thread + reply
   static String driverRaiseTicketUrl = "$baseUrlApi/driver/app/support/ticket";
+
+  /// Admin-managed FAQs (public endpoint, same source the admin panel edits).
+  /// The driver FAQ screen used to ship a hardcoded list, so nothing an admin
+  /// wrote in Content & Policies ever reached drivers.
+  static String faqsUrl = "$baseUrlApi/support/faqs";
   static String driverSupportTicketsUrl = "$baseUrlApi/driver/app/support/tickets";
   static String driverSupportTicketDetailsUrl(String ticketId) =>
       "$baseUrlApi/driver/app/support/tickets/$ticketId";

@@ -1,5 +1,6 @@
 import 'package:movezy_driver_app/CommonWidgets/network_indicator.dart';
 import 'package:movezy_driver_app/Routes/app_routes.dart';
+import 'package:movezy_driver_app/Services/booking_alert_service.dart';
 import 'package:movezy_driver_app/Utils/Localization/app_translations.dart';
 import 'package:movezy_driver_app/Utils/OfflineStorage/offline_service.dart';
 import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
@@ -16,6 +17,14 @@ void main() async {
   // Initialize background services so widgets can Get.find<> them safely.
   await Get.putAsync<OfflineService>(() => OfflineService().init());
   await Get.putAsync<VoiceService>(() => VoiceService().init());
+
+  // Booking alerts belong to the app, not to a screen — but connect() was only
+  // ever CALLED from the dashboard's initState, so a session that hadn't
+  // mounted the dashboard yet (or logged in on another screen) had no listener
+  // and the global popup never fired. Start it here when a session already
+  // exists; connect() is a no-op without a token, and login/dashboard still
+  // call it (idempotent) for sessions that begin after startup.
+  BookingAlertService.instance.connect();
 
   runApp(const MyApp());
 }

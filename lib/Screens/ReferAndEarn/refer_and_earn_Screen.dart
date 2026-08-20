@@ -158,7 +158,9 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
                             )),
                         Column(
                           children: [
-                            const SizedBox(height: 30),
+                            // Compact hero: was 30/18/180 — pushed the share
+                            // actions below the fold (client feedback).
+                            const SizedBox(height: 14),
                             Center(
                               child: Container(
                                 margin: const EdgeInsets.only(left: 30, right: 30),
@@ -175,10 +177,10 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
                             // 30/30/30 everywhere flattened the design's rhythm:
                             // the illustration sits closer to the headline, and
                             // the stats card overlaps its base.
-                            const SizedBox(height: 18),
+                            const SizedBox(height: 10),
                             Image.asset(
                               "assets/mobile_icon.png",
-                              height: 180,
+                              height: 120,
                               fit: BoxFit.contain,
                             ),
                             const SizedBox(height: 4),
@@ -231,7 +233,7 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
                                 ],
                               ),
                             ),
-                            const SizedBox(height: 30),
+                            const SizedBox(height: 16),
                             // The 60%-black wrapper that used to sit here painted
                             // a dark band across the seam between the hero art
                             // and the white sheet — visible on any device where
