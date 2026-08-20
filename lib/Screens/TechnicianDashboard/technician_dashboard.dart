@@ -470,13 +470,20 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
               ],
 
               const SizedBox(height: 20),
-              // Client spec: the home screen is toggle + bookings + today's
-              // earnings + a small rating. The monthly revenue chart and the
-              // reviews list moved OFF the dashboard — earnings detail lives on
-              // the Earnings screen (this card opens it) and reviews on the
-              // Reviews screen (the corner rating opens it). Both sections
-              // still exist; they just no longer weigh down the first screen.
-              _todaysEarningsCard(stats),
+              // The client's remove-list for this screen was the graph, the
+              // monthly revenue section and the reviews list — the stat tiles
+              // stay. Rating is a small corner detail (their instruction),
+              // not a tile, and the earnings tile shows TODAY's figure as the
+              // doc asks; lifetime detail lives on the Earnings screen.
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [_ratingCorner()],
+                ),
+              ),
+              const SizedBox(height: 6),
+              _statGrid(stats),
               const SizedBox(height: 24),
               _bookingsSection(stats, bookings),
               const SizedBox(height: 24),
@@ -627,96 +634,111 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     );
   }
 
-  // ----------------------- Today's earnings -----------------------
-  /// The client spec lists exactly four things for the driver home: the
-  /// ONLINE/OFFLINE toggle, the booking alert area, "Today's Earnings" and
-  /// "Rating (small corner)".
-  ///
-  /// This replaces a five-tile grid (Rating, Total Earning, Total Service,
-  /// Upcoming Services, Todays Service). Nothing is lost: the per-tab counts
-  /// are on the bookings section right below, the full trip list is behind
-  /// "View All", and lifetime/period earnings are on the Earnings screen this
-  /// card opens. The figure shown is TODAY's, as specified — it used to be the
-  /// lifetime total under a "Total Earning" label.
-  Widget _todaysEarningsCard(DashboardStats stats) {
+  // -------------------------- Stat grid --------------------------
+  /// Four tiles. "Today's Earnings" leads (the client doc asks for today's
+  /// figure, not the lifetime total the tile used to show); the three service
+  /// counters stay — the client's remove-list was the graph, monthly revenue
+  /// and the reviews list, nothing else. Rating is the corner detail above
+  /// the grid, not a tile.
+  Widget _statGrid(DashboardStats stats) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: InkWell(
-        onTap: () async {
-          await pushTo(context, const EarningsScreen());
-          _loadDashboard(showLoader: false);
-        },
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 14, 10, 16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFE9EDF3)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.03),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 26,
-                          height: 26,
-                          decoration: BoxDecoration(
-                            color: AppColors.appColor.withValues(alpha: 0.10),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(Icons.account_balance_wallet_outlined,
-                              size: 14, color: AppColors.appColor),
-                        ),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            "Today's Earnings",
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w500,
-                                color: Colors.grey.shade600),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    // FittedBox: a big day would otherwise overflow at large
-                    // text scales.
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        _money.format(stats.todaysEarnings),
-                        maxLines: 1,
-                        style: TextStyle(
-                            fontSize: 26,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.appColor),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              _ratingCorner(),
-            ],
-          ),
-        ),
+      child: GridView.count(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        crossAxisCount: 2,
+        mainAxisSpacing: 14,
+        crossAxisSpacing: 14,
+        childAspectRatio: 1.62,
+        children: [
+          // The only earnings figure on the dashboard, so it is the natural
+          // entry point for the full Earnings breakdown.
+          _statTile(_money.format(stats.todaysEarnings), "Today's Earnings",
+              Icons.account_balance_wallet_outlined, onTap: () async {
+            await pushTo(context, const EarningsScreen());
+            _loadDashboard(showLoader: false);
+          }),
+          _statTile('${stats.totalServices}', 'Total Service',
+              Icons.receipt_long_outlined),
+          _statTile('${stats.upcomingServices}', 'Upcoming Services',
+              Icons.event_available_outlined),
+          // Zero-padded to two digits, as the design shows ("05").
+          _statTile('${stats.todaysServices}'.padLeft(2, '0'),
+              'Todays Service', Icons.today_outlined),
+        ],
       ),
+    );
+  }
+
+  Widget _statTile(String value, String label, IconData icon,
+      {VoidCallback? onTap}) {
+    final tile = Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE9EDF3)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // FittedBox: a big earnings day would otherwise overflow the
+                // tile at large text scales.
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.appColor),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: AppColors.appColor.withValues(alpha: 0.10),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 14, color: AppColors.appColor),
+          ),
+        ],
+      ),
+    );
+
+    if (onTap == null) return tile;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: tile,
     );
   }
 
