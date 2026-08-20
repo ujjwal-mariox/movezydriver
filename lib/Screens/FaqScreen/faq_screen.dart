@@ -74,39 +74,69 @@ class _FaqScreenState extends State<FaqScreen> {
   /// replaces it, and a failed/empty fetch leaves the driver with the local
   /// answers rather than an empty screen.
   final Map<String, List<Map<String, String>>> _remoteFaqs = {};
-  final Set<String> _loadingCategories = {};
+  bool _faqsLoaded = false;
+  bool _faqsLoading = false;
 
-  Future<void> _loadFaqs(String category) async {
-    if (_remoteFaqs.containsKey(category) ||
-        _loadingCategories.contains(category)) {
-      return;
-    }
-    _loadingCategories.add(category);
+  /// Normalised category key: lowercase, letters and digits only.
+  /// The admin panel's FAQ category is a FREE-TEXT field, so what an operator
+  /// types ("Payment", "payment issues", "Payment_Issues") will not equal this
+  /// screen's tile ids. Matching on the raw string would return nothing and
+  /// silently fall back to the bundled answers — the admin would edit FAQs and
+  /// see no change in the app, with no error anywhere.
+  static String _norm(String s) =>
+      s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+  /// Fetch every FAQ once and bucket them into this screen's tiles.
+  ///
+  /// One unfiltered request rather than per-category ones, because the server
+  /// filters on an exact category match that the free-text admin field cannot
+  /// be relied on to produce. Buckets by prefix in either direction, so
+  /// "payment", "Payments" and "Payment Issues" all land in the payment tile.
+  Future<void> _loadFaqs() async {
+    if (_faqsLoaded || _faqsLoading) return;
+    _faqsLoading = true;
     try {
       final res = await http
-          .get(Uri.parse('${ApiUrls.faqsUrl}?category=$category'))
+          .get(Uri.parse(ApiUrls.faqsUrl))
           .timeout(const Duration(seconds: 12));
       if (res.statusCode != 200) return;
       final body = jsonDecode(res.body);
       final list = (body is Map ? body['data'] : null);
       if (list is! List) return;
-      final parsed = list
-          .whereType<Map>()
-          .map((e) => {
-                'q': (e['question'] ?? '').toString(),
-                'a': (e['answer'] ?? '').toString(),
-              })
-          .where((e) => e['q']!.isNotEmpty && e['a']!.isNotEmpty)
-          .toList();
-      // An empty server category is not an answer — keep the bundled set.
-      if (parsed.isEmpty) return;
+
+      final buckets = <String, List<Map<String, String>>>{};
+      for (final raw in list.whereType<Map>()) {
+        final q = (raw['question'] ?? '').toString().trim();
+        final a = (raw['answer'] ?? '').toString().trim();
+        if (q.isEmpty || a.isEmpty) continue;
+        final cat = _norm((raw['category'] ?? '').toString());
+        if (cat.isEmpty) continue;
+        for (final tile in _categories) {
+          final id = _norm(tile['id'] as String);
+          if (cat == id || cat.startsWith(id) || id.startsWith(cat)) {
+            buckets.putIfAbsent(tile['id'] as String, () => []).add({'q': q, 'a': a});
+            break;
+          }
+        }
+      }
       if (!mounted) return;
-      setState(() => _remoteFaqs[category] = parsed);
+      // Only replace tiles the server actually has answers for; a tile the
+      // admin has not written yet keeps its bundled answers.
+      setState(() {
+        _remoteFaqs.addAll(buckets);
+        _faqsLoaded = true;
+      });
     } catch (e) {
-      debugPrint('FAQ fetch failed for $category: $e');
+      debugPrint('FAQ fetch failed: $e');
     } finally {
-      _loadingCategories.remove(category);
+      _faqsLoading = false;
     }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFaqs();
   }
 
   @override
@@ -260,13 +290,7 @@ class _FaqScreenState extends State<FaqScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       child: InkWell(
-        onTap: () {
-          final id = cat['id'] as String;
-          setState(() => _selectedCategory = id);
-          // Pull the admin-managed answers for this category; the bundled set
-          // renders immediately in the meantime.
-          _loadFaqs(id);
-        },
+        onTap: () => setState(() => _selectedCategory = cat['id'] as String),
         borderRadius: BorderRadius.circular(14),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
