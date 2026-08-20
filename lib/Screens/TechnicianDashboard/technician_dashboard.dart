@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -471,14 +470,14 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
               ],
 
               const SizedBox(height: 20),
-              _statGrid(stats),
-              const SizedBox(height: 24),
               // Client spec: the home screen is toggle + bookings + today's
               // earnings + a small rating. The monthly revenue chart and the
               // reviews list moved OFF the dashboard — earnings detail lives on
-              // the Earnings screen (the stat tile opens it) and reviews on
-              // the Reviews screen (the rating tile opens it). Both sections
+              // the Earnings screen (this card opens it) and reviews on the
+              // Reviews screen (the corner rating opens it). Both sections
               // still exist; they just no longer weigh down the first screen.
+              _todaysEarningsCard(stats),
+              const SizedBox(height: 24),
               _bookingsSection(stats, bookings),
               const SizedBox(height: 24),
             ],
@@ -628,110 +627,125 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     );
   }
 
-  // -------------------------- Stat grid --------------------------
-  Widget _statGrid(DashboardStats stats) {
+  // ----------------------- Today's earnings -----------------------
+  /// The client spec lists exactly four things for the driver home: the
+  /// ONLINE/OFFLINE toggle, the booking alert area, "Today's Earnings" and
+  /// "Rating (small corner)".
+  ///
+  /// This replaces a five-tile grid (Rating, Total Earning, Total Service,
+  /// Upcoming Services, Todays Service). Nothing is lost: the per-tab counts
+  /// are on the bookings section right below, the full trip list is behind
+  /// "View All", and lifetime/period earnings are on the Earnings screen this
+  /// card opens. The figure shown is TODAY's, as specified — it used to be the
+  /// lifetime total under a "Total Earning" label.
+  Widget _todaysEarningsCard(DashboardStats stats) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: GridView.count(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        crossAxisCount: 2,
-        mainAxisSpacing: 14,
-        crossAxisSpacing: 14,
-        childAspectRatio: 1.62,
-        children: [
-          // The only earnings figure on the dashboard, so it is the natural
-          // entry point for the full Earnings breakdown.
-          _statTile('${_dashboard!.driver.rating.toStringAsFixed(1)} ★', 'Rating',
-              Icons.star_rate_rounded, onTap: () async {
-            await pushTo(context, const DriverReviewsScreen());
-          }),
-          _statTile(_money.format(stats.totalEarnings), 'Total Earning',
-              Icons.account_balance_wallet_outlined, onTap: () async {
-            await pushTo(context, const EarningsScreen());
-            _loadDashboard(showLoader: false);
-          }),
-          _statTile('${stats.totalServices}', 'Total Service',
-              Icons.receipt_long_outlined),
-          _statTile('${stats.upcomingServices}', 'Upcoming Services',
-              Icons.event_available_outlined),
-          // Zero-padded to two digits, as the design shows ("05").
-          _statTile('${stats.todaysServices}'.padLeft(2, '0'),
-              'Todays Service', Icons.today_outlined),
-        ],
+      child: InkWell(
+        onTap: () async {
+          await pushTo(context, const EarningsScreen());
+          _loadDashboard(showLoader: false);
+        },
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 10, 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE9EDF3)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 26,
+                          height: 26,
+                          decoration: BoxDecoration(
+                            color: AppColors.appColor.withValues(alpha: 0.10),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(Icons.account_balance_wallet_outlined,
+                              size: 14, color: AppColors.appColor),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            "Today's Earnings",
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.grey.shade600),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    // FittedBox: a big day would otherwise overflow at large
+                    // text scales.
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _money.format(stats.todaysEarnings),
+                        maxLines: 1,
+                        style: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.appColor),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _ratingCorner(),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  Widget _statTile(String value, String label, IconData icon,
-      {VoidCallback? onTap}) {
-    final tile = Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE9EDF3)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // FittedBox: a six-figure lifetime earning would otherwise
-                // overflow the tile at large text scales.
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    value,
-                    maxLines: 1,
-                    style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.appColor),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.grey.shade600),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            width: 26,
-            height: 26,
-            decoration: BoxDecoration(
-              color: AppColors.appColor.withValues(alpha: 0.10),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, size: 14, color: AppColors.appColor),
-          ),
-        ],
-      ),
-    );
-
-    if (onTap == null) return tile;
+  /// "Rating (small corner)" — a small detail tucked in the corner of the
+  /// earnings card rather than a tile of its own, and still the way into the
+  /// reviews behind the number.
+  Widget _ratingCorner() {
     return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: tile,
+      onTap: () => pushTo(context, const DriverReviewsScreen()),
+      borderRadius: BorderRadius.circular(50),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.star_rate_rounded,
+                size: 15, color: Color(0xFFF5A623)),
+            const SizedBox(width: 3),
+            Text(
+              _dashboard!.driver.rating.toStringAsFixed(1),
+              style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade700),
+            ),
+            Icon(Icons.chevron_right, size: 15, color: Colors.grey.shade400),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1060,26 +1074,6 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
           ),
         ),
       );
-
-  /// Monthly revenue bar chart (design: driver dashboard).
-  ///
-  /// The backend has always returned `monthlyRevenue` and the model has always
-  /// parsed it — and fl_chart was in pubspec with zero usages anywhere. The
-  /// data was on the wire and simply never drawn. Hidden when there's nothing
-  /// to show rather than rendering an empty axis.
-  /// Reviews, as the design has them: header + View All, then entries with a
-
-  /// A 1/2/5 x 10^n step, so four gridlines land on round numbers whatever the
-  /// driver actually earns.
-  double _axisStep(double top) {
-    if (top <= 0) return 1;
-    final rough = top / 4;
-    final mag = math.pow(10, (math.log(rough) / math.ln10).floor()).toDouble();
-    final norm = rough / mag;
-    final nice = norm <= 1 ? 1.0 : (norm <= 2 ? 2.0 : (norm <= 5 ? 5.0 : 10.0));
-    return nice * mag;
-  }
-
 
   Widget _avatar(String imageUrl) {
     final url = imageUrl.trim();
