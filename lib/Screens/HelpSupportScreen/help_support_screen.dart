@@ -264,6 +264,26 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     return ' (${category.split('_').first})';
   }
 
+  /// The ticket category for a call-back escalation. Every escalation used to
+  /// be filed under the literal category "Call Back", so the admin queue (and
+  /// the server's priority derivation) saw no topic at all — a payment
+  /// complaint and a general question both landed as MEDIUM "Call Back".
+  /// The bot already knows the topic; put it on the ticket.
+  String _ticketCategory() {
+    switch (_currentCategory) {
+      case 'payment_bot_response':
+        return 'Payment Issue';
+      case 'cancel_bot_response':
+        return 'Trip Cancellation';
+      case 'app_issue_bot_response':
+        return 'App Problem';
+      case 'customer_bot_response':
+        return 'Customer Issue';
+      default:
+        return 'Call Back';
+    }
+  }
+
   Future<void> _handleEmergencyEscalation() async {
     HapticFeedback.heavyImpact();
     setState(() => _showSupportOptions = true);
@@ -515,7 +535,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     setState(() => _raisingTicket = true);
 
     final ticketId = await _supportService.createTicket(
-      category: 'Call Back',
+      category: _ticketCategory(),
       subject: 'Call back requested${_issueContext()}',
       message:
           'Driver requested a call back on their registered number.$_detailsSummary',
