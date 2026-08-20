@@ -212,7 +212,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       color: tint.withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(icon, size: 19, color: tint),
+                    child: Icon(icon, size: 18, color: tint),
                   ),
                   const SizedBox(width: 10),
                   Expanded(

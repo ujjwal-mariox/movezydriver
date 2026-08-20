@@ -180,7 +180,7 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
                             const SizedBox(height: 10),
                             Image.asset(
                               "assets/mobile_icon.png",
-                              height: 120,
+                              height: 96,
                               fit: BoxFit.contain,
                             ),
                             const SizedBox(height: 4),
@@ -252,7 +252,7 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
                                   mainAxisAlignment: MainAxisAlignment.start,
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const SizedBox(height: 20),
+                                    const SizedBox(height: 14),
                                     Container(
                                       margin: const EdgeInsets.only(left: 20, right: 20),
                                       child: const Text(
@@ -264,19 +264,19 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
                                             fontWeight: FontWeight.bold),
                                       ),
                                     ),
-                                    const SizedBox(height: 20),
+                                    const SizedBox(height: 14),
                                     _howItWorksStep(
                                       "1",
                                       "Your friend gets ₹$_refereeReward added to their wallet",
                                       "When they sign up using your referral code",
                                     ),
-                                    const SizedBox(height: 20),
+                                    const SizedBox(height: 14),
                                     _howItWorksStep(
                                       "2",
                                       "You get ₹$_referrerReward added to your wallet",
                                       "When your friend signs up with your code",
                                     ),
-                                    const SizedBox(height: 20),
+                                    const SizedBox(height: 14),
                                     GestureDetector(
                                       onTap: _copyCode,
                                       child: Container(
@@ -318,7 +318,7 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
                                         ),
                                       ),
                                     ),
-                                    const SizedBox(height: 25),
+                                    const SizedBox(height: 16),
                                     // WhatsApp Share Button - Prominent
                                     GestureDetector(
                                       onTap: _shareOnWhatsApp,
@@ -389,7 +389,16 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
                                         ),
                                       ],
                                     ),
-                                    const SizedBox(height: 10),
+                                    // Clears the Android navigation bar: this
+                                    // page has no SafeArea and a Scaffold with
+                                    // only body: adds no bottom inset, so the
+                                    // "Other Apps" button sat under the nav bar
+                                    // on 3-button devices.
+                                    SizedBox(
+                                        height: 10 +
+                                            MediaQuery.of(context)
+                                                .padding
+                                                .bottom),
                                   ],
                                 ),
                               ),

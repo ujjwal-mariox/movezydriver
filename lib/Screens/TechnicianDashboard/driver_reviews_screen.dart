@@ -86,7 +86,7 @@ class _DriverReviewsScreenState extends State<DriverReviewsScreen> {
         children: [
           const SizedBox(height: 120),
           Icon(Icons.star_border,
-              size: 44, color: Colors.grey.shade400),
+              size: 40, color: Colors.grey.shade400),
           const SizedBox(height: 12),
           const Center(
             child: Text('No reviews yet',

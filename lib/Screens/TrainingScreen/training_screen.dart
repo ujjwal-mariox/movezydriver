@@ -410,7 +410,7 @@ class _MaterialCard extends StatelessWidget {
       height: 140,
       width: double.infinity,
       color: const Color(0xFFF3F4F6),
-      child: Icon(icon, size: 42, color: const Color(0xFF9CA3AF)),
+      child: Icon(icon, size: 40, color: const Color(0xFF9CA3AF)),
     );
   }
 }

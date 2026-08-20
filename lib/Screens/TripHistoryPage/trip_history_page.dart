@@ -536,7 +536,7 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
         const SizedBox(height: 130),
         Center(
           child: Icon(Icons.receipt_long_outlined,
-              size: 54, color: Colors.grey.shade400),
+              size: 56, color: Colors.grey.shade400),
         ),
         const SizedBox(height: 14),
         Center(
@@ -557,7 +557,7 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
         const SizedBox(height: 130),
         Center(
           child:
-              Icon(Icons.cloud_off_rounded, size: 54, color: Colors.grey.shade400),
+              Icon(Icons.cloud_off_rounded, size: 56, color: Colors.grey.shade400),
         ),
         const SizedBox(height: 14),
         Center(

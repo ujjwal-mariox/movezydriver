@@ -113,7 +113,7 @@ class _OtpScreenState extends State<OtpScreen> {
               width: 90,
               child: Row(
                 children: [
-                  Icon(Icons.arrow_back_ios_rounded, size: 19,),
+                  Icon(Icons.arrow_back_ios_rounded, size: 18,),
                   SizedBox(width: 5,),
                   Text('back'.tr, style: TextStyle(color: Colors.black, fontSize: 15, fontWeight: FontWeight.w500),
                   )

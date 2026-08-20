@@ -257,7 +257,7 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
                             done
                                 ? Icons.check_circle
                                 : Icons.radio_button_unchecked,
-                            size: 21,
+                            size: 20,
                             color: done
                                 ? const Color(0xFF22C55E)
                                 : Colors.grey.shade400,
@@ -467,12 +467,12 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
                           Marker(
                             point: pickupLatLng,
                             width: 40, height: 40,
-                            child: const Icon(Icons.location_on, color: Colors.green, size: 36),
+                            child: const Icon(Icons.location_on, color: Colors.green, size: 32),
                           ),
                           Marker(
                             point: dropLatLng,
                             width: 40, height: 40,
-                            child: const Icon(Icons.location_on, color: Colors.red, size: 36),
+                            child: const Icon(Icons.location_on, color: Colors.red, size: 32),
                           ),
                         ],
                       ),
@@ -848,7 +848,7 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
                                   minimumSize: const Size(0, 36),
                                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                 ),
-                                icon: const Icon(Icons.close, size: 15, color: Colors.red),
+                                icon: const Icon(Icons.close, size: 14, color: Colors.red),
                                 label: Text('cancel_booking'.tr,
                                     style: const TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.w600)),
                               ),

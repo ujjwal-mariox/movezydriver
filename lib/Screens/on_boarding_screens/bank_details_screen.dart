@@ -183,7 +183,7 @@ class _BankDetailsScreenState extends State<BankDetailsScreen> {
                         child: editTextWidget(context: context,controller: driverNameController,hintText: 'select_bank'.tr,isOptional: false, labelText: 'bank'.tr,
                             suffixIcon: SizedBox(
                               width: 50,
-                              child: Icon(Icons.arrow_drop_down_rounded, size: 35,),
+                              child: Icon(Icons.arrow_drop_down_rounded, size: 32,),
                             )
                         )
                     ),

@@ -71,7 +71,7 @@ class SliderButtonWidget extends StatelessWidget {
                 border: Border.all(color: cardBorder),
               ),
               child: Center(
-                child: Icon(Icons.keyboard_double_arrow_right, color: arrowColor, size: 30,),
+                child: Icon(Icons.keyboard_double_arrow_right, color: arrowColor, size: 28,),
               ),
             ),
 

@@ -557,7 +557,7 @@ class _MyBadgeScreenState extends State<MyBadgeScreen> {
                           ? Text((badge['icon'] ?? '🏆').toString(),
                               style: const TextStyle(fontSize: 52))
                           : Icon(Icons.lock,
-                              size: 44,
+                              size: 40,
                               color:
                                   Colors.black.withValues(alpha: 0.10)),
                     ),

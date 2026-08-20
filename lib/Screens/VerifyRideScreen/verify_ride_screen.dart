@@ -365,7 +365,7 @@ class _VerifyRideScreenState extends State<VerifyRideScreen> {
                                           ),
                                         )
                                       : Icon(Icons.keyboard_double_arrow_right,
-                                          color: AppColors.appColor, size: 26),
+                                          color: AppColors.appColor, size: 24),
                                 ),
                               ),
                             ],

@@ -336,7 +336,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
       padding: const EdgeInsets.symmetric(vertical: 80, horizontal: 24),
       child: Column(
         children: [
-          Icon(Icons.wifi_off, size: 52, color: Colors.grey.shade400),
+          Icon(Icons.wifi_off, size: 48, color: Colors.grey.shade400),
           const SizedBox(height: 14),
           const Text(
             'Could not load your earnings right now.',
@@ -674,7 +674,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(9),
             ),
-            child: Icon(icon, size: 17, color: color),
+            child: Icon(icon, size: 16, color: color),
           ),
         ],
       ),
@@ -736,7 +736,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
       padding: const EdgeInsets.symmetric(vertical: 34, horizontal: 20),
       child: Column(
         children: [
-          Icon(icon, size: 44, color: Colors.grey.shade400),
+          Icon(icon, size: 40, color: Colors.grey.shade400),
           const SizedBox(height: 12),
           Text(
             message,

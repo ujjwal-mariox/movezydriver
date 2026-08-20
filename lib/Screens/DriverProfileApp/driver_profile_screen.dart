@@ -514,12 +514,12 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFF3F6F8)),
           child: ClipOval(
             child: url.isEmpty
-                ? const Icon(Icons.person_outline, size: 42, color: Colors.black54)
+                ? const Icon(Icons.person_outline, size: 40, color: Colors.black54)
                 : CachedNetworkImage(
                     imageUrl: url,
                     fit: BoxFit.cover,
                     errorWidget: (context, url, error) =>
-                        const Icon(Icons.person_outline, size: 42, color: Colors.black54),
+                        const Icon(Icons.person_outline, size: 40, color: Colors.black54),
                     placeholder: (context, url) => Center(
                       child: SizedBox(
                         width: 22,

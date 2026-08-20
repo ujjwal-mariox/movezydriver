@@ -734,7 +734,7 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
                                       : Icon(
                                           Icons.keyboard_double_arrow_right,
                                           color: AppColors.appColor,
-                                          size: 26),
+                                          size: 24),
                                 ),
                               ),
                             ],
@@ -908,7 +908,7 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.cloud_off_outlined, size: 44, color: Colors.grey.shade400),
+            Icon(Icons.cloud_off_outlined, size: 40, color: Colors.grey.shade400),
             const SizedBox(height: 12),
             const Text(
               'Could not load this trip. Check your connection and retry.',
@@ -1099,7 +1099,7 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
               width: 44,
               height: 56,
               child: const Icon(Icons.location_on,
-                  color: Color(0xFFE02D3C), size: 44),
+                  color: Color(0xFFE02D3C), size: 40),
             ),
             // Upcoming stops beyond the current one, numbered; the final drop
             // gets a small grey pin while a stop is still the target.
@@ -1131,7 +1131,7 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
                 width: 30,
                 height: 38,
                 child: const Icon(Icons.location_on,
-                    color: Color(0xFF9AA4B2), size: 30),
+                    color: Color(0xFF9AA4B2), size: 28),
               ),
           ],
         ),
@@ -1252,7 +1252,7 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
                         border: Border.all(color: AppColors.appColor, width: 1.4),
                       ),
                       child: Icon(Icons.phone,
-                          color: AppColors.appColor, size: 19),
+                          color: AppColors.appColor, size: 18),
                     ),
                   ),
                 ],

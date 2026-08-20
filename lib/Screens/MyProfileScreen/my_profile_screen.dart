@@ -480,7 +480,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.check_circle,
-                  size: 13, color: Color(0xFF1E9E52)),
+                  size: 12, color: Color(0xFF1E9E52)),
               const SizedBox(width: 4),
               Text(
                 label,

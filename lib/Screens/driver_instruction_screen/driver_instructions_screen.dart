@@ -305,7 +305,7 @@ class InstructionCard extends StatelessWidget {
 
   Widget _icon(Color color) {
     final glyph = _glyphs[item.icon.trim().toLowerCase()];
-    if (glyph != null) return Icon(glyph, size: 26, color: color);
+    if (glyph != null) return Icon(glyph, size: 24, color: color);
     // Not a known key — show whatever the admin entered (usually an emoji).
     return Text(item.icon, style: const TextStyle(fontSize: 26));
   }

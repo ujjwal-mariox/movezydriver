@@ -122,7 +122,7 @@ class _AwardsScreenState extends State<AwardsScreen> {
                   left: 20,
                   right: 20,
                   child: Container(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
@@ -166,7 +166,7 @@ class _AwardsScreenState extends State<AwardsScreen> {
                             ],
                           ),
                         ),
-                        Image.asset('assets/trophy_big.png', width: 72, height: 72, fit: BoxFit.contain),
+                        Image.asset('assets/trophy_big.png', width: 56, height: 56, fit: BoxFit.contain),
                       ],
                     ),
                   ),
@@ -174,7 +174,7 @@ class _AwardsScreenState extends State<AwardsScreen> {
               ],
             ),
 
-            const SizedBox(height: 18),
+            const SizedBox(height: 12),
 
             if (_loading)
               const Padding(
@@ -235,12 +235,12 @@ class _AwardsScreenState extends State<AwardsScreen> {
                       : '${peak['remaining']} more for ₹${peak['reward']} extra',
                 ),
 
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
 
               // --- INCENTIVE SUMMARY (real) ---
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(14),
                 margin: const EdgeInsets.symmetric(horizontal: 20),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -312,7 +312,7 @@ class _AwardsScreenState extends State<AwardsScreen> {
               ),
             ],
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 20),
           ],
         ),
       ),

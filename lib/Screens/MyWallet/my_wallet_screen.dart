@@ -679,7 +679,7 @@ class _MyWalletScreenState extends State<MyWalletScreen> {
             height: 50,
             child: ElevatedButton.icon(
               onPressed: _openWithdrawSheet,
-              icon: const Icon(Icons.account_balance, size: 19),
+              icon: const Icon(Icons.account_balance, size: 18),
               // The button was white-on-indigo before the card turned white, so it
               // takes the brand fill to stay visible.
               label: Text('withdraw'.tr, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.6)),

@@ -249,7 +249,7 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
               width: 44,
               height: 56,
               child: const Icon(Icons.location_on,
-                  color: _errorRed, size: 44),
+                  color: _errorRed, size: 40),
             ),
           ],
         ),
@@ -752,7 +752,7 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Icon(icon, color: colour, size: 26),
+      child: Icon(icon, color: colour, size: 24),
     );
 
     return Opacity(

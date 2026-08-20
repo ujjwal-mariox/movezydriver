@@ -258,7 +258,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
             ),
             Row(
               children: [
-                Icon(Icons.school_outlined, color: AppColors.appColor, size: 26),
+                Icon(Icons.school_outlined, color: AppColors.appColor, size: 24),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -755,7 +755,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.star_rate_rounded,
-                size: 15, color: Color(0xFFF5A623)),
+                size: 14, color: Color(0xFFF5A623)),
             const SizedBox(width: 3),
             Text(
               _dashboard!.driver.rating.toStringAsFixed(1),
@@ -764,7 +764,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
                   fontWeight: FontWeight.w600,
                   color: Colors.grey.shade700),
             ),
-            Icon(Icons.chevron_right, size: 15, color: Colors.grey.shade400),
+            Icon(Icons.chevron_right, size: 14, color: Colors.grey.shade400),
           ],
         ),
       ),
@@ -1024,7 +1024,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 44, color: Colors.grey.shade400),
+            Icon(icon, size: 40, color: Colors.grey.shade400),
             const SizedBox(height: 12),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -1091,7 +1091,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
           child: Icon(
             icon,
-            size: 26,
+            size: 24,
             color: active ? AppColors.appColor : Colors.grey.shade400,
           ),
         ),
@@ -1322,7 +1322,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
                 const Padding(
                   padding: EdgeInsets.only(top: 1),
                   child: Icon(Icons.location_on,
-                      size: 15, color: Color(0xFFE02D3C)),
+                      size: 14, color: Color(0xFFE02D3C)),
                 ),
                 const SizedBox(width: 8),
                 Expanded(child: Text(booking.dropAddress.isEmpty ? 'Drop' : booking.dropAddress, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500))),
