@@ -320,8 +320,15 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
                                     // WhatsApp Share Button - Prominent
                                     GestureDetector(
                                       onTap: _shareOnWhatsApp,
+                                      // Full width with the same 20px margins
+                                      // as the referral-code box above. The
+                                      // fixed 280px width left this button
+                                      // hugging the column's left edge while
+                                      // everything around it spanned or
+                                      // centred — the misalignment reported.
                                       child: Container(
-                                        width: 280,
+                                        margin: const EdgeInsets.only(
+                                            left: 20, right: 20),
                                         height: 52,
                                         decoration: BoxDecoration(
                                           color: const Color(0xFF25D366),

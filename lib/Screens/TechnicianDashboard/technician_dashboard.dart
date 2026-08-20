@@ -500,19 +500,21 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
       final offline = svc.isOffline.value;
       final syncing = svc.isSyncing.value;
       final pending = svc.pendingCount.value;
+      // Normal state shows NOTHING (client asked the "Online" bubble removed):
+      // the chip appears only when something needs the driver's attention —
+      // offline, or an offline-saved trip syncing back.
+      if (!offline && !syncing) return const SizedBox.shrink();
       final String label;
       final Color dot;
       if (syncing) {
         label = 'Syncing…';
         dot = Colors.amber;
-      } else if (offline) {
+      } else {
         label = pending > 0 ? 'Offline · $pending saved' : 'Offline';
         dot = Colors.redAccent;
-      } else {
-        label = 'Online';
-        dot = const Color(0xFF7CFC9A);
       }
       return Container(
+        margin: const EdgeInsets.only(right: 8),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.18),
@@ -556,7 +558,6 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
           ),
           const Spacer(),
           _networkChip(),
-          const SizedBox(width: 8),
           _walletPill(wallet.balance),
           const SizedBox(width: 10),
           _statusButton(driver),
