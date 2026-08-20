@@ -469,20 +469,28 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
                 _trainingGateCard(_dashboard!.training),
               ],
 
-              const SizedBox(height: 20),
+              const SizedBox(height: 18),
               // The client's remove-list for this screen was the graph, the
               // monthly revenue section and the reviews list — the stat tiles
               // stay. Rating is a small corner detail (their instruction),
-              // not a tile, and the earnings tile shows TODAY's figure as the
-              // doc asks; lifetime detail lives on the Earnings screen.
+              // not a tile. It anchors the right end of this section header —
+              // as a lone right-aligned chip over an otherwise empty row it
+              // read as a stray element, not a deliberate control.
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [_ratingCorner()],
+                  children: [
+                    // Same header style as "Recommended Bookings" below, so
+                    // the screen reads as two titled sections.
+                    const Text('Overview',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700)),
+                    const Spacer(),
+                    _ratingChip(),
+                  ],
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 10),
               _statGrid(stats),
               const SizedBox(height: 24),
               _bookingsSection(stats, bookings),
@@ -742,29 +750,37 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     );
   }
 
-  /// "Rating (small corner)" — a small detail tucked in the corner of the
-  /// earnings card rather than a tile of its own, and still the way into the
-  /// reviews behind the number.
-  Widget _ratingCorner() {
+  /// "Rating (small corner)" — the compact rating control at the right end of
+  /// the Overview header, and the way into the reviews behind the number. The
+  /// soft amber pill gives it a visible boundary so it reads as a button; as
+  /// bare text it looked like something left behind by accident.
+  Widget _ratingChip() {
     return InkWell(
       onTap: () => pushTo(context, const DriverReviewsScreen()),
       borderRadius: BorderRadius.circular(50),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF4E0),
+          borderRadius: BorderRadius.circular(50),
+          border: Border.all(
+              color: const Color(0xFFF5A623).withValues(alpha: 0.35)),
+        ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.star_rate_rounded,
-                size: 14, color: Color(0xFFF5A623)),
+                size: 16, color: Color(0xFFF5A623)),
             const SizedBox(width: 3),
             Text(
               _dashboard!.driver.rating.toStringAsFixed(1),
               style: TextStyle(
                   fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade700),
+                  fontWeight: FontWeight.w700,
+                  color: Colors.grey.shade800),
             ),
-            Icon(Icons.chevron_right, size: 14, color: Colors.grey.shade400),
+            const SizedBox(width: 2),
+            Icon(Icons.chevron_right, size: 14, color: Colors.grey.shade500),
           ],
         ),
       ),
