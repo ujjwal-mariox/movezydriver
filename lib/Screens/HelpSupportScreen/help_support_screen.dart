@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -408,6 +410,22 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
             // helpline is published to the app, so the option is gone rather
             // than sending drivers to a dead line. The two options below both
             // reach the real support queue.
+
+            // Call customer care — only when the admin has published a helpline
+            // (Settings → Support phone); a dead line is never offered.
+            if (ApiUrls.hasSupportPhone) ...[
+              _buildSupportOption(
+                icon: Icons.support_agent,
+                iconColor: Colors.green,
+                title: 'Call customer care',
+                subtitle: ApiUrls.supportPhoneNumber,
+                onTap: () async {
+                  final uri = Uri(scheme: 'tel', path: ApiUrls.supportPhoneNumber.replaceAll(' ', ''));
+                  await launchUrl(uri);
+                },
+              ),
+              const SizedBox(height: 12),
+            ],
 
             // Live Chat Option — opens the REAL support ticket chat (was a
             // fake scripted bot that never reached a human).

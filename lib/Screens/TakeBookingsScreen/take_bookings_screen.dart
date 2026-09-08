@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:movezy_driver_app/Services/booking_alert_service.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/Screens/BookingsDetailsScreen/bookings_details_screen.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/dashboard_api_service.dart';
@@ -129,6 +130,7 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
   }
 
   Future<void> _acceptBooking() async {
+    BookingAlertService.instance.stopRinging();
     setState(() => _isAccepting = true);
     HapticFeedback.heavyImpact();
 
@@ -159,6 +161,7 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
   /// must NOT pretend it declined — the card would just reappear on the
   /// dashboard with no explanation.
   Future<void> _rejectBooking() async {
+    BookingAlertService.instance.stopRinging();
     setState(() => _isRejecting = true);
     final resp = await _apiService.rejectBooking(booking.id);
     if (!mounted) return;

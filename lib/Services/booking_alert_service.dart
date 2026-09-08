@@ -1,9 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:hexcolor/hexcolor.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
+import 'package:movezy_driver_app/Screens/ChatScreen/chat_screen.dart';
+import 'package:movezy_driver_app/Services/app_lifecycle_service.dart';
+import 'package:movezy_driver_app/Services/booking_ring_service.dart';
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
 import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
 
@@ -26,6 +32,11 @@ class BookingAlertService {
 
   IO.Socket? _socket;
   bool _alertShowing = false;
+
+  /// The offer currently ringing, and the timer that silences it when the
+  /// server's window closes (or after 30 s, whichever first).
+  String? _ringingBookingId;
+  Timer? _ringTimer;
 
   /// Screens that want to react to booking events register here. The dashboard
   /// uses this to refresh its pending list; it no longer owns the connection.
@@ -68,27 +79,154 @@ class BookingAlertService {
           .enableForceNew()
           .enableAutoConnect()
           .enableReconnection()
+          // Keep trying for as long as the app lives; the OS drops sockets on
+          // every lock/unlock and the driver must not have to notice.
+          .setReconnectionAttempts(1000000)
+          .setReconnectionDelay(2000)
+          .setReconnectionDelayMax(15000)
           .build(),
     );
 
-    // The backend event is `booking:request` (dispatch service).
+    _socket!.onConnect((_) => debugPrint('Booking alert socket connected'));
+    _socket!.onDisconnect((_) => debugPrint('Booking alert socket disconnected'));
+
+    // The backend event is `booking:request` (dispatch service). Offers now
+    // go to ONE driver at a time, so a missed ring means the job moves on.
     _socket!.on('booking:request', (payload) {
       _notifyRefresh();
+      _startRinging(payload);
       showIncomingBookingAlert(payload);
     });
     // Kept for backward/admin compatibility; harmless if never fired.
     _socket!.on('booking:new', (_) => _notifyRefresh());
-    _socket!.on('booking:closed', (_) {
+    _socket!.on('booking:closed', (payload) {
       _notifyRefresh();
-      // Another driver took it — a still-open alert now offers a dead job.
+      final id = _bookingIdOf(payload);
+      _stopRingingFor(id);
+      // Another driver took it, or the window passed — a still-open alert
+      // now offers a dead job.
+      dismissAlert();
+      final reason = _field(payload, 'reason');
+      if (reason == 'EXPIRED') {
+        Get.snackbar('Request timed out', 'The booking was offered to the next driver.',
+            snackPosition: SnackPosition.BOTTOM, duration: const Duration(seconds: 3));
+      }
+    });
+    _socket!.on('booking:cancelled', (payload) {
+      _notifyRefresh();
+      _stopRingingFor(_bookingIdOf(payload));
       dismissAlert();
     });
-    _socket!.on('booking:cancelled', (_) => _notifyRefresh());
     _socket!.on('booking:status', (_) => _notifyRefresh());
+
+    // A customer message while the chat screen is closed: badge the driver
+    // in-app, or notify when the app is in the background.
+    _socket!.on('chat:notify', (payload) {
+      final id = _bookingIdOf(payload);
+      final preview = _field(payload, 'preview');
+      if (id.isEmpty) return;
+      if (AppLifecycleService.instance.isForeground) {
+        Get.snackbar(
+          'Message from customer',
+          preview.isEmpty ? 'Tap to open the chat' : preview,
+          snackPosition: SnackPosition.TOP,
+          duration: const Duration(seconds: 4),
+          onTap: (_) => _openChat(id),
+          mainButton: TextButton(onPressed: () => _openChat(id), child: const Text('Open')),
+        );
+      } else {
+        BookingRingService.instance.showChatNotification(
+          bookingId: id,
+          preview: preview.isEmpty ? 'Tap to open the chat' : preview,
+        );
+      }
+    });
+  }
+
+  static String _bookingIdOf(dynamic payload) => _field(payload, 'bookingId');
+
+  static String _field(dynamic payload, String key) {
+    try {
+      final v = (payload as Map)[key];
+      return v?.toString() ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  // ── Ring ──
+
+  void _startRinging(dynamic payload) {
+    final id = _bookingIdOf(payload);
+    // A fresh offer always restarts the ring.
+    _ringTimer?.cancel();
+    _ringingBookingId = id;
+
+    int expiresAt = 0;
+    try {
+      expiresAt = ((payload as Map)['expiresAt'] as num?)?.toInt() ?? 0;
+    } catch (_) {}
+    final untilExpiry = expiresAt > 0
+        ? Duration(milliseconds: expiresAt - DateTime.now().millisecondsSinceEpoch)
+        : const Duration(seconds: 30);
+    final window = untilExpiry.inSeconds <= 0
+        ? const Duration(seconds: 5)
+        : (untilExpiry > const Duration(seconds: 30) ? const Duration(seconds: 30) : untilExpiry);
+
+    BookingRingService.instance.startRing();
+    _vibrate();
+    if (!AppLifecycleService.instance.isForeground) {
+      double fare = 0;
+      try {
+        fare = ((payload as Map)['estimatedFare'] as num?)?.toDouble() ?? 0;
+      } catch (_) {}
+      final pickup = _field((payload as Map)['pickup'], 'address');
+      BookingRingService.instance.showBookingNotification(bookingId: id, pickup: pickup, fare: fare);
+    }
+    _ringTimer = Timer(window, () => _stopRingingFor(id));
+  }
+
+  Future<void> _vibrate() async {
+    for (int i = 0; i < 3; i++) {
+      HapticFeedback.heavyImpact();
+      await Future.delayed(const Duration(milliseconds: 220));
+    }
+  }
+
+  void _stopRingingFor(String bookingId) {
+    if (bookingId.isNotEmpty && _ringingBookingId != null && _ringingBookingId != bookingId) return;
+    stopRinging();
+  }
+
+  /// Silence the bell — called when the driver answers the offer (accept or
+  /// skip), when the offer closes, or when the window passes.
+  void stopRinging() {
+    _ringTimer?.cancel();
+    _ringTimer = null;
+    final id = _ringingBookingId;
+    _ringingBookingId = null;
+    BookingRingService.instance.stopRing();
+    if (id != null && id.isNotEmpty) BookingRingService.instance.cancelBookingNotification(id);
+  }
+
+  /// Notification taps: "booking:<id>" opens the offer, "chat:<id>" the chat.
+  void handleNotificationTap(String payload) {
+    if (payload.startsWith('booking:')) {
+      _openBooking(payload.substring('booking:'.length));
+    } else if (payload.startsWith('chat:')) {
+      _openChat(payload.substring('chat:'.length));
+    }
+  }
+
+  void _openChat(String bookingId) {
+    if (bookingId.isEmpty) return;
+    if (Get.isSnackbarOpen) Get.closeCurrentSnackbar();
+    Get.to(() => ChatScreen(bookingId: bookingId, customerName: 'Customer'));
   }
 
   /// Called on logout so the next driver does not inherit this session.
   void disconnect() {
+    stopRinging();
     dismissAlert();
     _refreshListeners.clear();
     openBookingHandler = null;
@@ -227,6 +365,7 @@ class BookingAlertService {
   }
 
   Future<void> _openBooking(String bookingId) async {
+    stopRinging();
     dismissAlert();
     // Back to the root route first so the pending list behind any pushed
     // screen is the fresh one.

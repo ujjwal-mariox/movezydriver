@@ -223,4 +223,12 @@ class ApiUrls {
   // real (list + unreadCount + mark-read); the app simply had no screen for it.
   static String driverNotificationsUrl =
       "$baseUrlApi/driver/app/notifications";
+
+  // Masked calling — the server bridges the call; the app never sees the number.
+  static String driverCallCustomerUrl(String bookingId) => "$baseUrlApi/driver/app/bookings/$bookingId/call";
+  // Predefined chat lines (admin-managed) and unread count for a booking's chat.
+  static String chatQuickRepliesUrl = "$baseUrlApi/driver/app/chat/quick-replies";
+  static String chatUnreadUrl(String bookingId) => "$baseUrlApi/driver/app/chat/$bookingId/unread";
+  // Presence heartbeat — posted by the foreground service every minute.
+  static String driverHeartbeatUrl = "$baseUrlApi/driver/app/heartbeat";
 }

@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'package:movezy_driver_app/Screens/ChatScreen/chat_screen.dart';
+import 'package:movezy_driver_app/CommonWidgets/trip_support_sheet.dart';
+import 'package:movezy_driver_app/Services/masked_call_service.dart';
 
 import 'package:get/get.dart';
 import 'package:movezy_driver_app/Utils/OfflineStorage/offline_service.dart';
@@ -389,13 +392,17 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
 
   // ── Actions ──
 
-  Future<void> _callCustomer() async {
-    if (_customerPhone.isEmpty) {
-      Fluttertoast.showToast(msg: 'Customer number unavailable');
-      return;
-    }
-    final uri = Uri.parse('tel:$_customerPhone');
-    if (await canLaunchUrl(uri)) await launchUrl(uri);
+  /// Server-bridged call — the customer's real number is never on this
+  /// device (the payload carries it masked); both sides see Movezy's number.
+  Future<void> _callCustomer() => MaskedCallService.callCustomer(context, widget.bookingId);
+
+  void _openChat() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(bookingId: widget.bookingId, customerName: _customerName),
+      ),
+    );
   }
 
   /// Open turn-by-turn navigation to the current target (next stop or drop).
@@ -410,19 +417,10 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
   }
 
   /// Raise a real support ticket for this booking.
-  Future<void> _raiseTicket() async {
-    final resp = await _apiService.raiseTicket(
-      category: 'Order Issue',
-      subject: 'Issue with booking ${widget.bookingId}',
-      message: 'Driver raised a ticket from the trip screen.',
-      bookingId: widget.bookingId,
-    );
-    if (!mounted) return;
-    final ok = resp != null && (resp['code'] == 1 || resp['code'] == 200);
-    Fluttertoast.showToast(
-      msg: ok ? 'Ticket raised. Support will contact you.' : 'Could not raise ticket. Try again.',
-    );
-  }
+  /// Help sheet: call customer care, chat with support, or raise a ticket
+  /// with a chosen reason (the old icon filed a blank ticket silently).
+  Future<void> _raiseTicket() =>
+      showTripSupportSheet(context, bookingId: widget.bookingId, screen: 'trip');
 
   /// Whether this booking is gated by a delivery OTP. The flag comes from the
   /// details endpoint; the code itself is never sent to the driver.
@@ -1238,6 +1236,22 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
                               fontSize: 12.5, color: _grayShade2),
                         ),
                       ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Chat and call both stay available for the whole trip.
+                  InkWell(
+                    onTap: _openChat,
+                    customBorder: const CircleBorder(),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.appColor, width: 1.4),
+                      ),
+                      child: Icon(Icons.chat_bubble_outline,
+                          color: AppColors.appColor, size: 18),
                     ),
                   ),
                   const SizedBox(width: 8),

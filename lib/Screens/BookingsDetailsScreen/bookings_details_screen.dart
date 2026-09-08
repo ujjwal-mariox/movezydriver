@@ -1,4 +1,6 @@
 ﻿import 'dart:convert';
+import 'package:movezy_driver_app/CommonWidgets/trip_support_sheet.dart';
+import 'package:movezy_driver_app/Services/masked_call_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
@@ -125,19 +127,10 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
 
   /// Raise a real support ticket for this booking (the button was a
   /// non-interactive Container before — it did nothing).
-  Future<void> _raiseTicket() async {
-    final resp = await _apiService.raiseTicket(
-      category: 'Order Issue',
-      subject: 'Issue with booking ${booking.id}',
-      message: 'Driver raised a ticket from the booking screen.',
-      bookingId: booking.id,
-    );
-    if (!mounted) return;
-    final ok = resp != null && (resp['code'] == 1 || resp['code'] == 200);
-    Fluttertoast.showToast(
-      msg: ok ? 'Ticket raised. Support will contact you.' : 'Could not raise ticket. Try again.',
-    );
-  }
+  /// Help sheet: call customer care, chat with support, or raise a ticket
+  /// with a chosen reason (the old button filed a blank ticket silently).
+  Future<void> _raiseTicket() =>
+      showTripSupportSheet(context, bookingId: booking.id, screen: 'booking');
 
   /// Cancel this booking (customer unreachable, wrong address, etc.). Confirmed
   /// first — it hands the job back to the pool and ends this driver's trip.
@@ -367,17 +360,10 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
     }
   }
 
-  Future<void> _callCustomer() async {
-    final phone = booking.pickup.contactPhone;
-    if (phone.isEmpty) {
-      Fluttertoast.showToast(msg: 'no_contact_number'.tr);
-      return;
-    }
-    final uri = Uri.parse("tel:$phone");
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    }
-  }
+  /// Server-bridged: the customer's number never reaches this app; both
+  /// sides only see the Movezy number. Falls back to a direct dial only when
+  /// the server says so.
+  Future<void> _callCustomer() => MaskedCallService.callCustomer(context, booking.id);
 
   /// Scheduled pickup time where there is one, else when the job was raised -
   /// the design's "Start In" row. The backend can send the literal string

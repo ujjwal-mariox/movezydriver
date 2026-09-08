@@ -1,4 +1,7 @@
 import 'package:movezy_driver_app/CommonWidgets/network_indicator.dart';
+import 'package:movezy_driver_app/Services/booking_ring_service.dart';
+import 'package:movezy_driver_app/Services/background_presence_service.dart';
+import 'package:movezy_driver_app/Services/app_lifecycle_service.dart';
 import 'package:movezy_driver_app/Routes/app_routes.dart';
 import 'package:movezy_driver_app/Services/booking_alert_service.dart';
 import 'package:movezy_driver_app/Utils/Localization/app_translations.dart';
@@ -24,6 +27,14 @@ void main() async {
   // and the global popup never fired. Start it here when a session already
   // exists; connect() is a no-op without a token, and login/dashboard still
   // call it (idempotent) for sessions that begin after startup.
+  // Ring + notifications for offers, foreground service for staying online
+  // with the screen locked, and resume hooks — all app-lifetime.
+  await BookingRingService.instance.init();
+  BookingRingService.instance.onNotificationTap =
+      BookingAlertService.instance.handleNotificationTap;
+  await BackgroundPresenceService.init();
+  AppLifecycleService.instance.register();
+
   BookingAlertService.instance.connect();
 
   runApp(const MyApp());

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:movezy_driver_app/Screens/ChatScreen/quick_replies_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -233,6 +234,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
 
           // Message Input
+          QuickRepliesBar(onSend: (text) => _chatService.sendMessage(text)),
           _buildChatInput(),
         ],
       ),

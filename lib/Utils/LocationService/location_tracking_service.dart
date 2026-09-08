@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:movezy_driver_app/Services/background_presence_service.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
@@ -66,6 +67,10 @@ class LocationTrackingService {
 
     _isTracking = true;
 
+    // Keep the process (socket + this timer) alive with the screen locked, and
+    // heartbeat from a service isolate as a second channel.
+    BackgroundPresenceService.start();
+
     // Send location immediately, then on the cadence for the current mode.
     await _sendCurrentLocation();
     _restartTimer();
@@ -84,8 +89,20 @@ class LocationTrackingService {
     // Notify backend that driver is offline
     _socket?.emit('driver:status', {'isOnline': false});
     _disconnectSocket();
+    BackgroundPresenceService.stop();
 
     debugPrint('Location tracking stopped');
+  }
+
+  /// App came back to the foreground: make sure the socket is up and push a
+  /// fresh position straight away instead of waiting for the next tick.
+  void onResume() {
+    if (!_isTracking) return;
+    if (_socket == null || _socket!.connected != true) {
+      _connectSocket();
+    }
+    _sendCurrentLocation();
+    _restartTimer();
   }
 
   /// Send current GPS location to backend via socket
