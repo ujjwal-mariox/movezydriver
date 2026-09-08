@@ -54,6 +54,8 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
   List<String> fuelTypeList = [];
   /// Full fuel catalog; fuelTypeList is the subset the chosen type allows.
   List<String> _allFuelTypes = [];
+  /// Body types from System Configuration (non-2W); Open/Closed if the admin has none.
+  List<String> _masterBodyTypes = [];
   DateTime? _rcExpiry;
   DateTime? _insuranceExpiry;
   DateTime? _pucExpiry;
@@ -92,6 +94,10 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
               .map<String>((f) => f['name'].toString())
               .toList();
           fuelTypeList = List<String>.of(_allFuelTypes);
+          _masterBodyTypes = ((data['bodyTypes'] as List?) ?? [])
+              .map<String>((b) => (b is Map ? b['name'] : b).toString())
+              .where((b) => b.isNotEmpty)
+              .toList();
           // Admin-managed vehicle catalog. Keep id alongside name so submit can
           // send the vehicleTypeId dispatch needs.
           vehicleTypeList = ((data['vehicleTypes'] as List?) ?? [])
@@ -132,7 +138,9 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
   /// fits is cleared, so the server never sees a scooter tagged Diesel.
   void _applyTypeRules() {
     final twoW = _isTwoWheeler;
-    final newBody = twoW ? <String>['Scooter', 'Bike'] : <String>['Open', 'Closed'];
+    final newBody = twoW
+        ? <String>['Scooter', 'Bike']
+        : (_masterBodyTypes.isNotEmpty ? List<String>.of(_masterBodyTypes) : <String>['Open', 'Closed']);
     List<String> newFuel;
     if (twoW) {
       newFuel = _allFuelTypes.where((f) {
