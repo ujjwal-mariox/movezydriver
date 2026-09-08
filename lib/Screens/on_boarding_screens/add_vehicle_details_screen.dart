@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:get/get.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -51,6 +52,11 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
   List<Map<String, String>> vehicleTypeList = [];
   List<String> bodyTypeList = ['Open', 'Closed'];
   List<String> fuelTypeList = [];
+  /// Full fuel catalog; fuelTypeList is the subset the chosen type allows.
+  List<String> _allFuelTypes = [];
+  DateTime? _rcExpiry;
+  DateTime? _insuranceExpiry;
+  DateTime? _pucExpiry;
   bool isLoadingMasterData = true;
 
   // In-flight guard for Save & Continue. Without it a second tap posted a
@@ -82,18 +88,22 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
           cityList = (data['cities'] as List)
               .map<String>((c) => c['name'].toString())
               .toList();
-          fuelTypeList = (data['fuelTypes'] as List)
+          _allFuelTypes = (data['fuelTypes'] as List)
               .map<String>((f) => f['name'].toString())
               .toList();
+          fuelTypeList = List<String>.of(_allFuelTypes);
           // Admin-managed vehicle catalog. Keep id alongside name so submit can
           // send the vehicleTypeId dispatch needs.
           vehicleTypeList = ((data['vehicleTypes'] as List?) ?? [])
               .map<Map<String, String>>((v) => {
                     'id': (v['_id'] ?? v['id'] ?? '').toString(),
                     'name': (v['name'] ?? '').toString(),
+                    // 2W / 3W / 4W / HV — drives the Scooter/Bike + Petrol/Electric rules.
+                    'categoryCode': (v['categoryCode'] ?? '').toString(),
                   })
               .where((v) => v['id']!.isNotEmpty && v['name']!.isNotEmpty)
               .toList();
+          _applyTypeRules();
           isLoadingMasterData = false;
         });
       } else {
@@ -107,6 +117,105 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
         isLoadingMasterData = false;
       });
     }
+  }
+
+  bool get _isTwoWheeler {
+    final t = vehicleTypeList.firstWhere(
+      (v) => v['id'] == vehicleTypeId,
+      orElse: () => const <String, String>{},
+    );
+    return (t['categoryCode'] ?? '') == '2W';
+  }
+
+  /// Two-wheelers are Scooter/Bike on Petrol or Electric; everything else keeps
+  /// Open/Closed bodies and the full fuel list. A selection that no longer
+  /// fits is cleared, so the server never sees a scooter tagged Diesel.
+  void _applyTypeRules() {
+    final twoW = _isTwoWheeler;
+    final newBody = twoW ? <String>['Scooter', 'Bike'] : <String>['Open', 'Closed'];
+    List<String> newFuel;
+    if (twoW) {
+      newFuel = _allFuelTypes.where((f) {
+        final l = f.toLowerCase();
+        return l == 'petrol' || l == 'electric' || l == 'ev';
+      }).toList();
+      if (newFuel.isEmpty) newFuel = <String>['Petrol', 'Electric'];
+    } else {
+      newFuel = List<String>.of(_allFuelTypes);
+    }
+    if (!listEquals(newBody, bodyTypeList)) {
+      bodyTypeList = newBody;
+      if (bodyType != null && !newBody.contains(bodyType)) bodyType = null;
+    }
+    fuelTypeList = newFuel;
+    if (oilType != null && !newFuel.contains(oilType)) oilType = null;
+  }
+
+  IconData _bodyTypeIcon(String type) {
+    switch (type) {
+      case 'Scooter':
+        return Icons.moped;
+      case 'Bike':
+        return Icons.two_wheeler;
+      case 'Open':
+        return Icons.fire_truck_outlined;
+      default:
+        return Icons.local_shipping;
+    }
+  }
+
+  String? _fmtDate(DateTime? d) => d == null
+      ? null
+      : '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  Future<void> _pickExpiry(DateTime? current, ValueChanged<DateTime?> onPicked) async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: current ?? now,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 20),
+    );
+    if (picked != null && mounted) setState(() => onPicked(picked));
+  }
+
+  Widget _expiryTile(String label, DateTime? value, ValueChanged<DateTime?> onPicked) {
+    return InkWell(
+      onTap: () => _pickExpiry(value, onPicked),
+      child: Container(
+        margin: const EdgeInsets.only(left: 15, right: 15, bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 14),
+        decoration: BoxDecoration(
+          border: Border.all(color: HexColor("#E1E6EF"), width: 1.5),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.event_outlined, size: 18, color: HexColor("#607080")),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(label, style: TextStyle(fontSize: 13, color: HexColor("#607080"))),
+            ),
+            Text(
+              _fmtDate(value) ?? 'not_set'.tr,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: value == null ? HexColor("#607080") : Colors.black,
+              ),
+            ),
+            if (value != null)
+              GestureDetector(
+                onTap: () => setState(() => onPicked(null)),
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Icon(Icons.close, size: 16, color: HexColor("#607080")),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _onSaveAndContinue() async {
@@ -157,6 +266,9 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
         vehicleType: vehicleType.toString(),
         vehicleTypeId: vehicleTypeId ?? '',
         oilType: oilType.toString(),
+        rcExpiryDate: _fmtDate(_rcExpiry),
+        insuranceExpiryDate: _fmtDate(_insuranceExpiry),
+        pucExpiryDate: _fmtDate(_pucExpiry),
         isOnboarding: widget.isOnboarding,
       );
     } finally {
@@ -360,6 +472,7 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                               if (match['id']!.isNotEmpty) {
                                 vehicleTypeId = match['id'];
                                 vehicleType = match['name'];
+                                _applyTypeRules();
                               }
                             }
                           }
@@ -513,6 +626,7 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                             vehicleType = vehicleTypeList
                                 .firstWhere((v) => v['id'] == value,
                                     orElse: () => {'name': ''})['name'];
+                            _applyTypeRules();
                           });
                         },
                         validator: (value) =>
@@ -559,7 +673,7 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Icon(
-                                      type == 'Open' ? Icons.fire_truck_outlined : Icons.local_shipping,
+                                      _bodyTypeIcon(type),
                                       size: 22,
                                       color: isSelected ? Colors.white : HexColor("#607080"),
                                     ),
@@ -606,6 +720,7 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                           contentPadding: EdgeInsets.zero,
                         ),
                         hint: Text('choose_one'.tr,style: TextStyle(fontSize: 14,color: HexColor("#607080")),),
+                        key: ValueKey('fuel-${fuelTypeList.join(',')}-${oilType ?? ''}'),
                         initialValue: oilType,
                         items: fuelTypeList
                             .map(
@@ -625,9 +740,21 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                       ),
                     ),
 
+                    SizedBox(height: 12,),
 
+                    Container(
+                      margin: EdgeInsets.only(left: 15, bottom: 4),
+                      child: Text('document_expiry_optional'.tr, style: TextStyle(color: Colors.black, fontSize: 13, fontWeight: FontWeight.w600),),
+                    ),
+                    Container(
+                      margin: EdgeInsets.only(left: 15, right: 15, bottom: 8),
+                      child: Text('document_expiry_hint'.tr, style: TextStyle(color: HexColor("#607080"), fontSize: 11),),
+                    ),
+                    _expiryTile('rc_expiry'.tr, _rcExpiry, (d) => _rcExpiry = d),
+                    _expiryTile('insurance_expiry'.tr, _insuranceExpiry, (d) => _insuranceExpiry = d),
+                    _expiryTile('puc_expiry'.tr, _pucExpiry, (d) => _pucExpiry = d),
 
-                    SizedBox(height: 20,),
+                    SizedBox(height: 10,),
                   ],
                 ),
               ),

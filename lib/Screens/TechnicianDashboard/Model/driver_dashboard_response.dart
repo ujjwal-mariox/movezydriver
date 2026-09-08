@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:movezy_driver_app/Utils/vehicle_scope.dart';
+
 DriverDashboardResponse driverDashboardResponseFromJson(String str) =>
     DriverDashboardResponse.fromJson(json.decode(str));
 
@@ -37,12 +39,21 @@ class DriverDashboardData {
   final DashboardBookings bookings;
   final DashboardTraining training;
 
+  /// Every vehicle on the account, which one is active, and which one these
+  /// numbers are scoped to (null = whole account).
+  final List<VehicleScopeOption> vehicles;
+  final String? activeVehicleId;
+  final String? scopedVehicleId;
+
   DriverDashboardData({
     required this.driver,
     required this.wallet,
     required this.stats,
     required this.bookings,
     required this.training,
+    this.vehicles = const [],
+    this.activeVehicleId,
+    this.scopedVehicleId,
   });
 
   factory DriverDashboardData.fromJson(Map<String, dynamic> json) {
@@ -64,6 +75,15 @@ class DriverDashboardData {
             ? Map<String, dynamic>.from(json['training'] as Map)
             : const {},
       ),
+      vehicles: (json['vehicles'] is List)
+          ? (json['vehicles'] as List)
+              .whereType<Map>()
+              .map((v) => VehicleScopeOption.fromJson(Map<String, dynamic>.from(v)))
+              .where((v) => v.id.isNotEmpty)
+              .toList()
+          : const [],
+      activeVehicleId: json['activeVehicleId']?.toString(),
+      scopedVehicleId: json['scopedVehicleId']?.toString(),
     );
   }
 }

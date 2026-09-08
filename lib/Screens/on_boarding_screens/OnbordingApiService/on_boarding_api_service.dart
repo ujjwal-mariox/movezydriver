@@ -88,7 +88,7 @@ class OnBoardingApiService {
   /// button had no way to know a submit was in flight, so a second tap posted a
   /// second RC and created a second vehicle — each of which carries its own
   /// ₹999 joining fee. The screen now awaits this and blocks the button.
-  Future<void> addRcDetailsApi({required String vehicleNumber, required File? rcFrontImage, required File? rcBackImage, required BuildContext context, required String cityName, required String vehicleType, String vehicleTypeId = '', required String bodyType, required String oilType, bool isOnboarding = true,}) async {
+  Future<void> addRcDetailsApi({required String vehicleNumber, required File? rcFrontImage, required File? rcBackImage, required BuildContext context, required String cityName, required String vehicleType, String vehicleTypeId = '', required String bodyType, required String oilType, bool isOnboarding = true, String? rcExpiryDate, String? insuranceExpiryDate, String? pucExpiryDate,}) async {
     try {
       var request = http.MultipartRequest('POST', Uri.parse(ApiUrls.addRcDetailsApi));
 
@@ -101,6 +101,10 @@ class OnBoardingApiService {
         if (vehicleTypeId.isNotEmpty) "vehicleTypeId": vehicleTypeId,
         "bodyType": bodyType,
         "fuelType": oilType,
+        // Optional document dates; the server tracks expiry reminders from these.
+        if (rcExpiryDate != null) "rcExpiryDate": rcExpiryDate,
+        if (insuranceExpiryDate != null) "insuranceExpiryDate": insuranceExpiryDate,
+        if (pucExpiryDate != null) "pucExpiryDate": pucExpiryDate,
       });
 
       if (rcFrontImage != null) {

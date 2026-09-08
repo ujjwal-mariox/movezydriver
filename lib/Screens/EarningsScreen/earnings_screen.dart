@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:movezy_driver_app/Utils/vehicle_scope.dart';
 import 'package:get/get.dart';
 import 'package:intl/intl.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
@@ -295,6 +296,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
                           fontSize: 17,
                           fontWeight: FontWeight.bold),
                     ),
+                  ),
+                  VehicleScopeChip(
+                    light: true,
+                    trailingGap: 12,
+                    onChanged: () => _load(showLoader: false),
                   ),
                 ],
               ),

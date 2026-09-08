@@ -1,5 +1,8 @@
 import 'dart:convert';
 
+/// "2027-03-31T00:00:00.000Z" → "2027-03-31"; dates are shown, never computed on.
+String? _dateOnly(dynamic v) => v == null ? null : v.toString().split('T').first;
+
 DriverDetailsResponse driverDetailsResponseFromJson(String str) => DriverDetailsResponse.fromJson(json.decode(str));
 
 class DriverDetailsResponse {
@@ -29,8 +32,10 @@ class DriverDetailsResponse {
 class Data {
   List<VehicleItem>? vehicles;
   DriverInfo? driver;
+  /// The vehicle currently taking bookings (isPrimary), if any.
+  String? activeVehicleId;
 
-  Data({this.vehicles, this.driver});
+  Data({this.vehicles, this.driver, this.activeVehicleId});
 
   Data.fromJson(Map<String, dynamic> json) {
     if (json['vehicles'] != null) {
@@ -39,6 +44,7 @@ class Data {
           .toList();
     }
     driver = json['driver'] != null ? DriverInfo.fromJson(json['driver']) : null;
+    activeVehicleId = json['activeVehicleId']?.toString();
   }
 
   Map<String, dynamic> toJson() {
@@ -72,7 +78,12 @@ class VehicleItem {
   String? verificationStatus;
   bool? isPrimary;
   bool? isActive;
-
+  /// Taken off dispatch by the document-expiry check (RC / insurance / PUC).
+  bool? dispatchBlocked;
+  List<String>? dispatchReasons;
+  String? rcExpiryDate;
+  String? insuranceExpiryDate;
+  String? pucExpiryDate;
   VehicleItem({
     this.id,
     this.vehicleNumber,
@@ -113,6 +124,14 @@ class VehicleItem {
     verificationStatus = json['verificationStatus'];
     isPrimary = json['isPrimary'];
     isActive = json['isActive'];
+    final block = json['dispatchBlock'];
+    dispatchBlocked = block is Map ? block['blocked'] == true : null;
+    dispatchReasons = block is Map && block['reasons'] is List
+        ? (block['reasons'] as List).map((e) => e.toString()).toList()
+        : null;
+    rcExpiryDate = _dateOnly(json['rcExpiryDate']);
+    insuranceExpiryDate = _dateOnly(json['insuranceExpiryDate']);
+    pucExpiryDate = _dateOnly(json['pucExpiryDate']);
   }
 
   Map<String, dynamic> toJson() {

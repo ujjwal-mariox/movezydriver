@@ -1,5 +1,6 @@
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:movezy_driver_app/Utils/vehicle_scope.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -163,6 +164,11 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     if (response?.code == 1 && response?.data != null) {
       setState(() {
         _dashboard = response!.data;
+        VehicleScope.instance.updateFromDashboard(
+          response.data!.vehicles,
+          response.data!.activeVehicleId,
+          response.data!.scopedVehicleId,
+        );
         _isLoading = false;
         _error = '';
         // A socket-driven refresh can shrink the active tab's list under a live
@@ -486,6 +492,10 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
                         style: TextStyle(
                             fontSize: 16, fontWeight: FontWeight.w700)),
                     const Spacer(),
+                    VehicleScopeChip(
+                      trailingGap: 8,
+                      onChanged: () => _loadDashboard(showLoader: false),
+                    ),
                     _ratingChip(),
                   ],
                 ),

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:movezy_driver_app/Utils/vehicle_scope.dart';
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -115,6 +116,7 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
         'page': '$page',
         'limit': '$_pageSize',
         if (status != null) 'status': status,
+        ...VehicleScope.instance.queryParams,
       },
     );
     final response = await http.get(
@@ -396,7 +398,10 @@ class _TripHistoryPageState extends State<TripHistoryPage> {
       // several of the app's languages and a fixed row clipped them.
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: Row(children: _visibleChips.map(_chip).toList()),
+        child: Row(children: [
+          VehicleScopeChip(trailingGap: 8, onChanged: () => _load(spinner: true)),
+          ..._visibleChips.map(_chip),
+        ]),
       ),
     );
   }

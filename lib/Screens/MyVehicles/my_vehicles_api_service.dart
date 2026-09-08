@@ -114,6 +114,23 @@ class MyVehiclesApiService {
     return (body['data'] ?? {}) as Map<String, dynamic>;
   }
 
+  /// Make this vehicle the one that takes bookings; the others go idle.
+  /// Server refuses mid-trip, for unapproved/unpaid vehicles, and for
+  /// vehicles blocked on expired documents — the message says which.
+  Future<Map<String, dynamic>> activateVehicle(String vehicleId) async {
+    final response = await http.post(
+      Uri.parse(ApiUrls.activateVehicleUrl(vehicleId)),
+      headers: _headers,
+    );
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode < 200 ||
+        response.statusCode >= 300 ||
+        body['code'] == 0) {
+      throw Exception(body['message']?.toString() ?? 'Could not activate vehicle');
+    }
+    return body;
+  }
+
   /// Get onboarding fee details (amounts, discounts)
   Future<Map<String, dynamic>> getOnboardingFee() async {
     final response = await http.get(

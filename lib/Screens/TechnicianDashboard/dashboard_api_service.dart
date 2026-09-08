@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:movezy_driver_app/Utils/vehicle_scope.dart';
 
 import 'package:http/http.dart' as http;
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
@@ -9,7 +10,11 @@ class DashboardApiService {
   Future<DriverDashboardResponse?> fetchDashboard() async {
     try {
       final response = await http.get(
-        Uri.parse(ApiUrls.driverDashboardUrl),
+        Uri.parse(ApiUrls.driverDashboardUrl).replace(
+          queryParameters: VehicleScope.instance.queryParams.isEmpty
+              ? null
+              : VehicleScope.instance.queryParams,
+        ),
         headers: _headers,
       ).timeout(const Duration(seconds: 30));
 
@@ -342,8 +347,12 @@ class DashboardApiService {
   }) async {
     try {
       final response = await http.get(
-        Uri.parse(
-            '${ApiUrls.driverBookingHistoryUrl}?page=1&limit=$limit&status=COMPLETED'),
+        Uri.parse(ApiUrls.driverBookingHistoryUrl).replace(queryParameters: {
+          'page': '1',
+          'limit': '$limit',
+          'status': 'COMPLETED',
+          ...VehicleScope.instance.queryParams,
+        }),
         headers: _headers,
       ).timeout(const Duration(seconds: 30));
       if (response.statusCode != 200) return null;

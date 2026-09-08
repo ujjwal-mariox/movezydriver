@@ -139,6 +139,8 @@ class ApiUrls {
 
   // My Vehicles
   static String myVehiclesUrl = "$baseUrlApi/driver/app/my-vehicles";
+  // One active vehicle per partner: this one takes bookings, the rest go idle.
+  static String activateVehicleUrl(String vehicleId) => "$baseUrlApi/driver/app/my-vehicles/$vehicleId/activate";
 
   // Onboarding Fee
   static String onboardingFeeUrl = "$baseUrlApi/driver/app/onboarding-fee";

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:movezy_driver_app/Utils/vehicle_scope.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:get/get.dart';
 import 'package:hexcolor/hexcolor.dart';
@@ -37,6 +38,8 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
   DriverInfo? _driver;
   bool _isLoading = true;
   List<String> _payingVehicleIds = [];
+  /// Vehicle whose "Set as active" call is in flight.
+  String? _activatingId;
   String? _applyingReferralVehicleId;
   int _feePerVehicle = 999;
 
@@ -533,6 +536,56 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
     return parts.join(', ');
   }
 
+  Future<void> _activate(VehicleItem v) async {
+    if (v.id == null || _activatingId != null) return;
+    setState(() => _activatingId = v.id);
+    try {
+      final res = await _apiService.activateVehicle(v.id!);
+      if (!mounted) return;
+      // Dashboard / earnings / history follow the newly active vehicle.
+      VehicleScope.instance.reset();
+      final msg = res['message']?.toString() ?? '';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg.isNotEmpty ? msg : 'vehicle_activated'.tr)),
+      );
+      await _fetchVehicles();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
+    } finally {
+      if (mounted) setState(() => _activatingId = null);
+    }
+  }
+
+  Widget _pill(String text, Color color, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(text,
+              style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w600, color: color)),
+        ],
+      ),
+    );
+  }
+
+  /// "RC 2027-03-31 · Ins. 2026-11-30 · PUC 2026-10-01" — only dates on file.
+  String _expiryLine(VehicleItem v) => [
+        if (v.rcExpiryDate != null) 'RC ${v.rcExpiryDate}',
+        if (v.insuranceExpiryDate != null) 'Ins. ${v.insuranceExpiryDate}',
+        if (v.pucExpiryDate != null) 'PUC ${v.pucExpiryDate}',
+      ].join(' · ');
+
   Widget _buildVehicleCard(VehicleItem vehicle) {
     final isPaid = vehicle.onboardingFeePaid == true;
     final hasDiscount = (vehicle.referralDiscount ?? 0) > 0;
@@ -619,6 +672,47 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
             ),
             const SizedBox(height: 3),
+          ],
+
+          // Active / blocked state, document dates, and the switch control.
+          if (vehicle.isPrimary == true || vehicle.dispatchBlocked == true) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                if (vehicle.isPrimary == true)
+                  _pill('active_vehicle'.tr, HexColor('#35B255'), Icons.check_circle),
+                if (vehicle.dispatchBlocked == true)
+                  _pill('off_dispatch_documents'.tr, Colors.red, Icons.block),
+              ],
+            ),
+          ],
+          if (_expiryLine(vehicle).isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Text(
+              _expiryLine(vehicle),
+              style: TextStyle(fontSize: 11, color: HexColor('#607080')),
+            ),
+          ],
+          if (vehicle.isPrimary != true &&
+              isPaid &&
+              (vehicle.verificationStatus ?? '').toLowerCase() == 'approved') ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 36,
+              child: OutlinedButton.icon(
+                onPressed: _activatingId == null ? () => _activate(vehicle) : null,
+                icon: _activatingId == vehicle.id
+                    ? const SizedBox(
+                        width: 14, height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.swap_horiz, size: 16),
+                label: Text('set_as_active'.tr,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+            ),
           ],
 
           // The "Upto Rs.25000 monthly earnings" line was removed. It was a
