@@ -599,6 +599,17 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
                       : 'Your estimated earnings',
                   style: const TextStyle(fontSize: 13, color: _grayShade2),
                 ),
+                // Why the customer's number is bigger: their total includes
+                // GST and the platform commission; earnings never did.
+                if (!estimateOnly && booking.customerTotal > 0) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '${'customer_pays'.tr} ₹${booking.customerTotal.toStringAsFixed(0)}'
+                    '${booking.gstAmount > 0 ? ' (${'incl_gst'.tr} ₹${booking.gstAmount.toStringAsFixed(0)})' : ''}'
+                    '${booking.commissionPercent > 0 ? ' · ${booking.commissionPercent.toStringAsFixed(booking.commissionPercent == booking.commissionPercent.roundToDouble() ? 0 : 1)}% ${'commission'.tr}' : ''}',
+                    style: const TextStyle(fontSize: 11.5, color: _grayShade2),
+                  ),
+                ],
               ],
             ),
           ),

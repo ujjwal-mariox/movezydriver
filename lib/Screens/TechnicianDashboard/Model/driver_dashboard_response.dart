@@ -313,6 +313,12 @@ class DashboardBooking {
   /// estimatedFare is the customer's gross — labelling that "your earnings"
   /// overstates it by roughly a quarter.
   final double estimatedEarnings;
+  /// Customer side (incl. GST) and the settlement figures behind the estimate.
+  final double customerTotal;
+  final double subtotal;
+  final double gstAmount;
+  final double commissionPercent;
+  final double commissionAmount;
   final double baseFare;
   final double addonTotal;
   final String customerName;
@@ -350,6 +356,11 @@ class DashboardBooking {
     required this.durationMin,
     required this.estimatedFare,
     required this.estimatedEarnings,
+    this.customerTotal = 0,
+    this.subtotal = 0,
+    this.gstAmount = 0,
+    this.commissionPercent = 0,
+    this.commissionAmount = 0,
     required this.baseFare,
     required this.addonTotal,
     required this.customerName,
@@ -387,6 +398,11 @@ class DashboardBooking {
       durationMin: _toInt(json['durationMin']),
       estimatedFare: _toDouble(json['estimatedFare']),
       estimatedEarnings: _toDouble(json['estimatedEarnings']),
+      customerTotal: _toDouble(json['customerTotal'] ?? json['estimatedFare']),
+      subtotal: _toDouble(json['subtotal']),
+      gstAmount: _toDouble(json['gstAmount']),
+      commissionPercent: _toDouble(json['commissionPercent']),
+      commissionAmount: _toDouble(json['commissionAmount']),
       baseFare: _toDouble(json['baseFare']),
       addonTotal: _toDouble(json['addonTotal']),
       customerName: json['customerName']?.toString() ?? '',

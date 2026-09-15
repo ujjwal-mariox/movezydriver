@@ -744,6 +744,13 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
                                       ],
                                     ),
                                     Text(earningsKnown ? 'your_estimated_earnings'.tr : 'Trip value (earnings pending)', style: const TextStyle(fontSize: 13, color: Colors.black)),
+                                    if (earningsKnown && booking.customerTotal > 0)
+                                      Text(
+                                        '${'customer_pays'.tr} ₹${booking.customerTotal.toStringAsFixed(0)}'
+                                        '${booking.gstAmount > 0 ? ' (${'incl_gst'.tr} ₹${booking.gstAmount.toStringAsFixed(0)})' : ''}'
+                                        '${booking.commissionPercent > 0 ? ' · ${booking.commissionPercent.toStringAsFixed(booking.commissionPercent == booking.commissionPercent.roundToDouble() ? 0 : 1)}% ${'commission'.tr}' : ''}',
+                                        style: const TextStyle(fontSize: 11, color: Colors.black54),
+                                      ),
                                   ],
                                 ),
                                 // Add-on work is already inside the settlement
