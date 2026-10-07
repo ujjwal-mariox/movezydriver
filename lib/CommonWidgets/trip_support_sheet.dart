@@ -79,7 +79,7 @@ Future<void> showTripSupportSheet(
               tile(Icons.support_agent, 'Call customer care', 'Helpline not published yet — use chat below', () {
                 Fluttertoast.showToast(msg: 'The helpline number is not available yet. Please use chat.');
               }, color: Colors.grey),
-            tile(Icons.chat_bubble_outline, 'Chat with support', 'Live support ticket chat', () {
+            tile(Icons.chat_bubble_outline, 'Chat with support', 'Get help from the bot, then contact support', () {
               Navigator.pop(ctx);
               Navigator.push(context, MaterialPageRoute(builder: (_) => const HelpSupportScreen()));
             }),

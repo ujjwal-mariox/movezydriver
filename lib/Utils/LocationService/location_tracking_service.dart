@@ -24,6 +24,8 @@ class LocationTrackingService {
   Timer? _timer;
   bool _isTracking = false;
   bool _tripActive = false;
+  Future<bool>? _starting;
+  int _trackingGeneration = 0;
 
   bool get isTracking => _isTracking;
 
@@ -48,40 +50,59 @@ class LocationTrackingService {
   }
 
   /// Start tracking — call when driver goes ONLINE
-  Future<void> startTracking() async {
-    if (_isTracking) return;
+  Future<bool> startTracking() {
+    if (_isTracking) return Future.value(true);
+    return _starting ??= _startTracking(
+      ++_trackingGeneration,
+    ).whenComplete(() => _starting = null);
+  }
 
-    // Check location permission
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
+  Future<bool> _startTracking(int generation) async {
+    try {
+      // Check location permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (generation != _trackingGeneration) return false;
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        debugPrint('Location permission denied — cannot track');
+        return false;
+      }
+
+      if (!await BackgroundPresenceService.start()) return false;
+      if (generation != _trackingGeneration) {
+        await BackgroundPresenceService.stop();
+        return false;
+      }
+
+      // Connect socket if not connected
+      _isTracking = true;
+      _connectSocket();
+
+      // Keep the process (socket + this timer) alive with the screen locked, and
+      // heartbeat from a service isolate as a second channel.
+
+      // Send location immediately, then on the cadence for the current mode.
+      await _sendCurrentLocation();
+      if (generation != _trackingGeneration || !_isTracking) return false;
+      _restartTimer();
+
+      debugPrint(
+        'Location tracking started (${_tripActive ? _tripInterval.inSeconds : _idleInterval.inSeconds}s interval)',
+      );
+      return true;
+    } catch (e) {
+      debugPrint('Location tracking could not start: $e');
+      stopTracking();
+      return false;
     }
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      debugPrint('Location permission denied — cannot track');
-      return;
-    }
-
-    // Connect socket if not connected
-    _connectSocket();
-
-    _isTracking = true;
-
-    // Keep the process (socket + this timer) alive with the screen locked, and
-    // heartbeat from a service isolate as a second channel.
-    BackgroundPresenceService.start();
-
-    // Send location immediately, then on the cadence for the current mode.
-    await _sendCurrentLocation();
-    _restartTimer();
-
-    debugPrint(
-      'Location tracking started (${_tripActive ? _tripInterval.inSeconds : _idleInterval.inSeconds}s interval)',
-    );
   }
 
   /// Stop tracking — call when driver goes OFFLINE
   void stopTracking() {
+    _trackingGeneration++;
     _isTracking = false;
     _timer?.cancel();
     _timer = null;
@@ -108,6 +129,7 @@ class LocationTrackingService {
   /// Send current GPS location to backend via socket
   Future<void> _sendCurrentLocation() async {
     if (!_isTracking || _socket == null) return;
+    final generation = _trackingGeneration;
 
     try {
       final position = await Geolocator.getCurrentPosition(
@@ -117,6 +139,8 @@ class LocationTrackingService {
         ),
       );
 
+      if (!_isTracking || generation != _trackingGeneration || _socket == null)
+        return;
       _socket!.emit('driver:location:update', {
         'lat': position.latitude,
         'lng': position.longitude,
@@ -124,8 +148,7 @@ class LocationTrackingService {
         'speed': position.speed,
       });
 
-      debugPrint(
-          'Location sent: ${position.latitude}, ${position.longitude}');
+      debugPrint('Location sent: ${position.latitude}, ${position.longitude}');
     } catch (e) {
       debugPrint('Error getting location: $e');
     }
@@ -133,6 +156,7 @@ class LocationTrackingService {
 
   void _connectSocket() {
     if (_socket?.connected == true) return;
+    _socket?.dispose();
 
     _socket = IO.io(
       ApiUrls.socketUrl,
@@ -167,7 +191,7 @@ class LocationTrackingService {
 
   /// Tell the backend this driver is online so it joins the drivers:online room.
   void _announceOnline() {
-    _socket!.emit('driver:status', {'isOnline': true});
+    if (_isTracking) _socket?.emit('driver:status', {'isOnline': true});
   }
 
   void _disconnectSocket() {

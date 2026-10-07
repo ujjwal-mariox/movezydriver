@@ -43,6 +43,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _scrollToBottom();
     });
     _chatService.connect();
+    _chatService.error.addListener(_onChatError);
 
     // Auto-scroll when new messages arrive
     _chatService.messages.addListener(_onNewMessage);
@@ -64,9 +65,17 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  void _onChatError() {
+    if (!mounted || _chatService.error.value == null) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(_chatService.error.value!)));
+  }
+
   @override
   void dispose() {
     _chatService.messages.removeListener(_onNewMessage);
+    _chatService.error.removeListener(_onChatError);
     _chatService.dispose();
     _messageController.dispose();
     _messageFocus.dispose();
@@ -74,11 +83,14 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  void _sendMessage() {
+  Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
-    _chatService.sendMessage(text);
-    _messageController.clear();
+    if (await _chatService.sendMessage(text) &&
+        mounted &&
+        _messageController.text.trim() == text) {
+      _messageController.clear();
+    }
   }
 
   Future<void> _pickAndSendImage() async {
@@ -118,7 +130,9 @@ class _ChatScreenState extends State<ChatScreen> {
     if (picked == null) return;
 
     // Validate image quality
-    final qualityResult = await ImageQualityValidator.validate(File(picked.path));
+    final qualityResult = await ImageQualityValidator.validate(
+      File(picked.path),
+    );
     if (!qualityResult.isAcceptable) {
       if (mounted) {
         await ImageQualityValidator.showQualityDialog(context, qualityResult);
@@ -131,10 +145,8 @@ class _ChatScreenState extends State<ChatScreen> {
     final croppedPath = await Navigator.push<String>(
       context,
       MaterialPageRoute(
-        builder: (_) => CropScreen(
-          title: 'Crop Image',
-          file: File(picked.path),
-        ),
+        builder: (_) =>
+            CropScreen(title: 'Crop Image', file: File(picked.path)),
       ),
     );
     if (croppedPath == null || !mounted) return;
@@ -146,11 +158,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
-      statusBarBrightness: Brightness.dark,
-    ));
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.dark,
+      ),
+    );
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F6F9),
@@ -172,7 +186,10 @@ class _ChatScreenState extends State<ChatScreen> {
                       width: 40,
                       height: 35,
                       alignment: Alignment.center,
-                      child: const Icon(Icons.arrow_back_ios, color: Colors.white),
+                      child: const Icon(
+                        Icons.arrow_back_ios,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                   Text(
@@ -257,7 +274,10 @@ class _ChatScreenState extends State<ChatScreen> {
             // and did nothing. There is no emoji-picker package here, so it now
             // focuses the field to bring up the keyboard (where emoji live).
             IconButton(
-              icon: const Icon(Icons.emoji_emotions_outlined, color: Colors.grey),
+              icon: const Icon(
+                Icons.emoji_emotions_outlined,
+                color: Colors.grey,
+              ),
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
               onPressed: () => _messageFocus.requestFocus(),
@@ -323,7 +343,9 @@ class _ChatBubble extends StatelessWidget {
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Column(
-        crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: isMe
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           Container(
             padding: const EdgeInsets.all(12),
@@ -336,7 +358,8 @@ class _ChatBubble extends StatelessWidget {
             // on a narrow (320dp) phone, where a fixed 300px bubble left almost
             // no margin.
             constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.75),
+              maxWidth: MediaQuery.of(context).size.width * 0.75,
+            ),
             child: Text(
               text,
               style: TextStyle(
@@ -377,7 +400,9 @@ class _ImageBubble extends StatelessWidget {
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Column(
-        crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: isMe
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           Container(
             margin: const EdgeInsets.only(top: 8),
@@ -392,7 +417,9 @@ class _ImageBubble extends StatelessWidget {
                         width: 150,
                         height: 150,
                         color: Colors.grey.shade200,
-                        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                        child: const Center(
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
                       ),
                       errorWidget: (_, _, _) => Container(
                         width: 150,

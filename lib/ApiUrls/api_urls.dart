@@ -119,6 +119,8 @@ class ApiUrls {
       "$baseUrlApi/driver/app/training/$moduleId/lessons/$lessonId/complete";
 
   // Bookings
+  static String driverIncomingOffersUrl = "$baseUrlApi/driver/app/bookings/offers";
+
   static String driverRecommendedBookingsUrl = "$baseUrlApi/driver/app/bookings/recommended";
 
   static String driverCurrentBookingUrl = "$baseUrlApi/driver/app/bookings/current";

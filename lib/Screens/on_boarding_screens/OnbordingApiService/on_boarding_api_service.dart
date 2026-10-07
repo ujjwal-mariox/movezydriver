@@ -25,39 +25,48 @@ class OnBoardingApiService {
     required BuildContext context,
   }) async {
     try {
-      var request = http.MultipartRequest('POST', Uri.parse(ApiUrls.ownerDetailsUrl));
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse(ApiUrls.ownerDetailsUrl),
+      );
 
       // Add owner name field
       request.fields['ownerName'] = ownerName;
 
       // Add Aadhaar front and back images
-      request.files.add(await http.MultipartFile.fromPath(
-        'aadhaarFrontImage',
-        aadhaarFrontImage.path,
-        contentType: MediaType('image', 'jpeg'),
-      ));
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'aadhaarFrontImage',
+          aadhaarFrontImage.path,
+          contentType: MediaType('image', 'jpeg'),
+        ),
+      );
 
-      request.files.add(await http.MultipartFile.fromPath(
-        'aadhaarBackImage',
-        aadhaarBackImage.path,
-        contentType: MediaType('image', 'jpeg'),
-      ));
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'aadhaarBackImage',
+          aadhaarBackImage.path,
+          contentType: MediaType('image', 'jpeg'),
+        ),
+      );
 
-      request.files.add(await http.MultipartFile.fromPath(
-        'panImage',
-        panImage.path,
-        contentType: MediaType('image', 'jpeg'),
-      ));
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'panImage',
+          panImage.path,
+          contentType: MediaType('image', 'jpeg'),
+        ),
+      );
 
-      request.files.add(await http.MultipartFile.fromPath(
-        'selfieImage',
-        selfieImage.path,
-        contentType: MediaType('image', 'jpeg'),
-      ));
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'selfieImage',
+          selfieImage.path,
+          contentType: MediaType('image', 'jpeg'),
+        ),
+      );
 
-      request.headers.addAll({
-        'Authorization': 'Bearer ${Prefs.accessToken}',
-      });
+      request.headers.addAll({'Authorization': 'Bearer ${Prefs.accessToken}'});
 
       debugPrint('Owner details upload URL: ${ApiUrls.ownerDetailsUrl}');
 
@@ -88,12 +97,31 @@ class OnBoardingApiService {
   /// button had no way to know a submit was in flight, so a second tap posted a
   /// second RC and created a second vehicle — each of which carries its own
   /// ₹999 joining fee. The screen now awaits this and blocks the button.
-  Future<void> addRcDetailsApi({required String vehicleNumber, required File? rcFrontImage, required File? rcBackImage, required BuildContext context, required String cityName, required String vehicleType, String vehicleTypeId = '', required String bodyType, required String oilType, bool isOnboarding = true, String? rcExpiryDate, String? insuranceExpiryDate, String? pucExpiryDate,}) async {
+  Future<void> addRcDetailsApi({
+    required String vehicleNumber,
+    required File? rcFrontImage,
+    required File? rcBackImage,
+    required BuildContext context,
+    required String cityName,
+    required String vehicleType,
+    String vehicleTypeId = '',
+    required String bodyType,
+    required String oilType,
+    bool isOnboarding = true,
+    String? editVehicleId,
+    String? rcExpiryDate,
+    String? insuranceExpiryDate,
+    String? pucExpiryDate,
+  }) async {
     try {
-      var request = http.MultipartRequest('POST', Uri.parse(ApiUrls.addRcDetailsApi));
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse(ApiUrls.addRcDetailsApi),
+      );
 
       request.fields.addAll({
         "vehicleNumber": vehicleNumber,
+        if (editVehicleId != null) "vehicleId": editVehicleId,
         "city": cityName,
         "vehicalId": vehicleType,
         // Admin-catalog id — backend ties the DriverVehicle to it so dispatch can
@@ -102,25 +130,32 @@ class OnBoardingApiService {
         "bodyType": bodyType,
         "fuelType": oilType,
         // Optional document dates; the server tracks expiry reminders from these.
-        if (rcExpiryDate != null) "rcExpiryDate": rcExpiryDate,
-        if (insuranceExpiryDate != null) "insuranceExpiryDate": insuranceExpiryDate,
-        if (pucExpiryDate != null) "pucExpiryDate": pucExpiryDate,
+        if (editVehicleId != null || rcExpiryDate != null)
+          "rcExpiryDate": rcExpiryDate ?? '',
+        if (editVehicleId != null || insuranceExpiryDate != null)
+          "insuranceExpiryDate": insuranceExpiryDate ?? '',
+        if (editVehicleId != null || pucExpiryDate != null)
+          "pucExpiryDate": pucExpiryDate ?? '',
       });
 
       if (rcFrontImage != null) {
-        request.files.add(await http.MultipartFile.fromPath(
-          'rcFrontImage',
-          rcFrontImage.path,
-          contentType: MediaType('image', 'jpeg'),
-        ));
+        request.files.add(
+          await http.MultipartFile.fromPath(
+            'rcFrontImage',
+            rcFrontImage.path,
+            contentType: MediaType('image', 'jpeg'),
+          ),
+        );
       }
 
       if (rcBackImage != null) {
-        request.files.add(await http.MultipartFile.fromPath(
-          'rcBackImage',
-          rcBackImage.path,
-          contentType: MediaType('image', 'jpeg'),
-        ));
+        request.files.add(
+          await http.MultipartFile.fromPath(
+            'rcBackImage',
+            rcBackImage.path,
+            contentType: MediaType('image', 'jpeg'),
+          ),
+        );
       }
 
       // Add headers
@@ -137,7 +172,9 @@ class OnBoardingApiService {
       final body = await response.stream.bytesToString();
       Map<String, dynamic> dataT = {};
       try {
-        dataT = body.isNotEmpty ? json.decode(body) as Map<String, dynamic> : {};
+        dataT = body.isNotEmpty
+            ? json.decode(body) as Map<String, dynamic>
+            : {};
       } catch (_) {
         // Non-JSON body (gateway HTML, empty 502…) — don't let it throw past
         // the caller's in-flight guard.
@@ -150,7 +187,10 @@ class OnBoardingApiService {
           // Never route back into the onboarding license step — just return to
           // the vehicles list (the caller refreshes it on pop).
           if (context.mounted) {
-            showCustomToast(context, dataT['message']?.toString() ?? 'Vehicle added successfully');
+            showCustomToast(
+              context,
+              dataT['message']?.toString() ?? 'Vehicle added successfully',
+            );
             Navigator.pop(context);
           }
           return;
@@ -168,7 +208,10 @@ class OnBoardingApiService {
         }
       } else {
         if (context.mounted) {
-          showCustomToast(context, dataT['message']?.toString() ?? "Something went wrong");
+          showCustomToast(
+            context,
+            dataT['message']?.toString() ?? "Something went wrong",
+          );
         }
       }
     } catch (e) {
@@ -182,16 +225,20 @@ class OnBoardingApiService {
     }
   }
 
-  Future<LoginResponse> addBankDetailsApi(BuildContext context, var params) async {
+  Future<LoginResponse> addBankDetailsApi(
+    BuildContext context,
+    var params,
+  ) async {
     // Bank details go to the dedicated /driver/app/bank-details endpoint, which
     // writes driver.bankDetails. (Previously this PUT hit /driver/personal-info,
     // which has no bank fields, so account number/IFSC were silently dropped.)
-    var response = await http.put(Uri.parse(ApiUrls.driverBankDetailsUrl),
-        body: json.encode(params),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${Prefs.accessToken}'
-        }
+    var response = await http.put(
+      Uri.parse(ApiUrls.driverBankDetailsUrl),
+      body: json.encode(params),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${Prefs.accessToken}',
+      },
     );
 
     print("Add bank details $params");
@@ -199,20 +246,19 @@ class OnBoardingApiService {
     print("Add bank details ${response.body}");
 
     var dataT = loginResponseFromJson(response.body);
-    if(response.statusCode == 200)
-    {
+    if (response.statusCode == 200) {
       pushTo(context, VerificationScreen());
-    }
-    else
-    {
-      showCustomToast(context, dataT.data?.txnId.toString() ?? "",);
+    } else {
+      showCustomToast(context, dataT.data?.txnId.toString() ?? "");
     }
     return loginResponseFromJson(response.body);
   }
 
   Future<LoginResponse> addLicenceApi(BuildContext context, var params) async {
     try {
-      final String licencePath = (params["driverLicence"] ?? "").toString().trim();
+      final String licencePath = (params["driverLicence"] ?? "")
+          .toString()
+          .trim();
       if (licencePath.isEmpty) {
         if (context.mounted) {
           showCustomToast(context, 'please_add_licence'.tr);
@@ -220,10 +266,11 @@ class OnBoardingApiService {
         return LoginResponse(code: 0, message: "driver_licence_required");
       }
 
-      final request = http.MultipartRequest('POST', Uri.parse(ApiUrls.addLicenceApi));
-      request.headers.addAll({
-        'Authorization': 'Bearer ${Prefs.accessToken}',
-      });
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse(ApiUrls.addLicenceApi),
+      );
+      request.headers.addAll({'Authorization': 'Bearer ${Prefs.accessToken}'});
 
       // Only send what was actually collected.
       //
@@ -240,24 +287,29 @@ class OnBoardingApiService {
       // out saves the images exactly as before. The profile screen already
       // degrades honestly — it hides the DL Number row when the number is
       // empty and renders "-" for an unparseable/absent expiry date.
-      final String licenseNumber =
-          (params["licenseNumber"] ?? "").toString().trim();
+      final String licenseNumber = (params["licenseNumber"] ?? "")
+          .toString()
+          .trim();
       final String expiryDate = (params["expiryDate"] ?? "").toString().trim();
       request.fields.addAll({
         if (licenseNumber.isNotEmpty) "licenseNumber": licenseNumber,
         if (expiryDate.isNotEmpty) "expiryDate": expiryDate,
       });
 
-      request.files.add(await http.MultipartFile.fromPath(
-        'frontImage',
-        licencePath,
-        contentType: MediaType('image', 'jpeg'),
-      ));
-      request.files.add(await http.MultipartFile.fromPath(
-        'backImage',
-        licencePath,
-        contentType: MediaType('image', 'jpeg'),
-      ));
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'frontImage',
+          licencePath,
+          contentType: MediaType('image', 'jpeg'),
+        ),
+      );
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'backImage',
+          licencePath,
+          contentType: MediaType('image', 'jpeg'),
+        ),
+      );
 
       final streamedResponse = await request.send();
       final body = await streamedResponse.stream.bytesToString();
@@ -277,7 +329,8 @@ class OnBoardingApiService {
           replaceRoute(context, const MyVehiclesScreen());
         }
       } else {
-        final errorMessage = decoded['message']?.toString() ??
+        final errorMessage =
+            decoded['message']?.toString() ??
             decoded['rMsg']?.toString() ??
             "Unable to save driver details.";
         if (context.mounted) {

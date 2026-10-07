@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:movezy_driver_app/Services/background_presence_service.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -23,9 +26,8 @@ import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
 /// screen, and the dialog is presented through Get's global navigator so it
 /// appears over whatever route is on top.
 ///
-/// Scope note: this covers the app being OPEN (any screen, foreground). A
-/// backgrounded or killed app needs a push notification to wake it — that is a
-/// different transport, not something a socket can do.
+/// Android's foreground service also polls persisted offers and forwards them
+/// here, recovering missed socket events while the phone is locked.
 class BookingAlertService {
   BookingAlertService._();
   static final BookingAlertService instance = BookingAlertService._();
@@ -34,9 +36,13 @@ class BookingAlertService {
   bool _alertShowing = false;
 
   /// The offer currently ringing, and the timer that silences it when the
-  /// server's window closes (or after 30 s, whichever first).
+  /// server's offer window closes.
   String? _ringingBookingId;
   Timer? _ringTimer;
+  Timer? _recoveryTimer;
+  bool _recovering = false;
+  String? _seenOffer;
+  int _sessionGeneration = 0;
 
   /// Screens that want to react to booking events register here. The dashboard
   /// uses this to refresh its pending list; it no longer owns the connection.
@@ -69,6 +75,7 @@ class BookingAlertService {
     if (Prefs.accessToken.isEmpty) return;
 
     _socket?.dispose();
+    _sessionGeneration++;
     _socket = IO.io(
       ApiUrls.socketUrl,
       IO.OptionBuilder()
@@ -87,16 +94,21 @@ class BookingAlertService {
           .build(),
     );
 
-    _socket!.onConnect((_) => debugPrint('Booking alert socket connected'));
-    _socket!.onDisconnect((_) => debugPrint('Booking alert socket disconnected'));
+    _socket!.onConnect((_) {
+      _notifyRefresh();
+      unawaited(recoverOffers());
+    });
+    _recoveryTimer ??= Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => recoverOffers(),
+    );
+    _socket!.onDisconnect(
+      (_) => debugPrint('Booking alert socket disconnected'),
+    );
 
     // The backend event is `booking:request` (dispatch service). Offers now
     // go to ONE driver at a time, so a missed ring means the job moves on.
-    _socket!.on('booking:request', (payload) {
-      _notifyRefresh();
-      _startRinging(payload);
-      showIncomingBookingAlert(payload);
-    });
+    _socket!.on('booking:request', (payload) => _receiveOffer(payload));
     // Kept for backward/admin compatibility; harmless if never fired.
     _socket!.on('booking:new', (_) => _notifyRefresh());
     _socket!.on('booking:closed', (payload) {
@@ -108,8 +120,12 @@ class BookingAlertService {
       dismissAlert();
       final reason = _field(payload, 'reason');
       if (reason == 'EXPIRED') {
-        Get.snackbar('Request timed out', 'The booking was offered to the next driver.',
-            snackPosition: SnackPosition.BOTTOM, duration: const Duration(seconds: 3));
+        Get.snackbar(
+          'Request timed out',
+          'The booking was offered to the next driver.',
+          snackPosition: SnackPosition.BOTTOM,
+          duration: const Duration(seconds: 3),
+        );
       }
     });
     _socket!.on('booking:cancelled', (payload) {
@@ -132,7 +148,10 @@ class BookingAlertService {
           snackPosition: SnackPosition.TOP,
           duration: const Duration(seconds: 4),
           onTap: (_) => _openChat(id),
-          mainButton: TextButton(onPressed: () => _openChat(id), child: const Text('Open')),
+          mainButton: TextButton(
+            onPressed: () => _openChat(id),
+            child: const Text('Open'),
+          ),
         );
       } else {
         BookingRingService.instance.showChatNotification(
@@ -154,34 +173,86 @@ class BookingAlertService {
     }
   }
 
+  void _receiveOffer(dynamic payload) {
+    if (payload is! Map) return;
+    final id = _bookingIdOf(payload);
+    final expires = payload['expiresAt'] as num?;
+    if (id.isEmpty ||
+        expires == null ||
+        expires.toInt() <= DateTime.now().millisecondsSinceEpoch)
+      return;
+    final key = id + ':' + expires.toInt().toString();
+    if (_seenOffer == key) return;
+    _seenOffer = key;
+    unawaited(BackgroundPresenceService.noteOffer(key));
+    _notifyRefresh();
+    _startRinging(payload);
+    showIncomingBookingAlert(payload);
+  }
+
+  void handleRecoveredOffers(List<dynamic> offers) {
+    if (_socket == null || Prefs.accessToken.isEmpty) return;
+    for (final offer in offers) {
+      _receiveOffer(offer);
+    }
+    final current = _ringingBookingId;
+    if (current != null && !offers.any((o) => _bookingIdOf(o) == current)) {
+      stopRinging();
+      dismissAlert();
+      _notifyRefresh();
+    }
+  }
+
+  Future<void> recoverOffers() async {
+    if (_recovering || _socket == null || Prefs.accessToken.isEmpty) return;
+    _recovering = true;
+    final generation = _sessionGeneration;
+    try {
+      final response = await http
+          .get(
+            Uri.parse(ApiUrls.driverIncomingOffersUrl),
+            headers: {'Authorization': 'Bearer ' + Prefs.accessToken},
+          )
+          .timeout(const Duration(seconds: 8));
+      if (_socket == null ||
+          generation != _sessionGeneration ||
+          response.statusCode != 200)
+        return;
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      if (body['data'] is List) handleRecoveredOffers(body['data'] as List);
+    } catch (_) {
+      // Keep the last valid offer until its server deadline during network loss.
+    } finally {
+      _recovering = false;
+    }
+  }
+
   // ── Ring ──
 
   void _startRinging(dynamic payload) {
     final id = _bookingIdOf(payload);
-    // A fresh offer always restarts the ring.
+    final expiresAt = (payload as Map)['expiresAt'] as num?;
+    if (id.isEmpty || expiresAt == null) return;
+    final window = Duration(
+      milliseconds: expiresAt.toInt() - DateTime.now().millisecondsSinceEpoch,
+    );
+    if (window <= Duration.zero) return;
     _ringTimer?.cancel();
     _ringingBookingId = id;
-
-    int expiresAt = 0;
-    try {
-      expiresAt = ((payload as Map)['expiresAt'] as num?)?.toInt() ?? 0;
-    } catch (_) {}
-    final untilExpiry = expiresAt > 0
-        ? Duration(milliseconds: expiresAt - DateTime.now().millisecondsSinceEpoch)
-        : const Duration(seconds: 30);
-    final window = untilExpiry.inSeconds <= 0
-        ? const Duration(seconds: 5)
-        : (untilExpiry > const Duration(seconds: 30) ? const Duration(seconds: 30) : untilExpiry);
-
     BookingRingService.instance.startRing();
     _vibrate();
     if (!AppLifecycleService.instance.isForeground) {
       double fare = 0;
       try {
-        fare = ((payload as Map)['estimatedFare'] as num?)?.toDouble() ?? 0;
+        fare = (payload['estimatedFare'] as num?)?.toDouble() ?? 0;
       } catch (_) {}
-      final pickup = _field((payload as Map)['pickup'], 'address');
-      BookingRingService.instance.showBookingNotification(bookingId: id, pickup: pickup, fare: fare);
+      final pickup = _field(payload['pickup'], 'address');
+      BookingRingService.instance.showBookingNotification(
+        bookingId: id,
+        pickup: pickup,
+        fare: fare,
+        expiresIn: window,
+      );
     }
     _ringTimer = Timer(window, () => _stopRingingFor(id));
   }
@@ -194,7 +265,10 @@ class BookingAlertService {
   }
 
   void _stopRingingFor(String bookingId) {
-    if (bookingId.isNotEmpty && _ringingBookingId != null && _ringingBookingId != bookingId) return;
+    if (bookingId.isNotEmpty &&
+        _ringingBookingId != null &&
+        _ringingBookingId != bookingId)
+      return;
     stopRinging();
   }
 
@@ -206,7 +280,8 @@ class BookingAlertService {
     final id = _ringingBookingId;
     _ringingBookingId = null;
     BookingRingService.instance.stopRing();
-    if (id != null && id.isNotEmpty) BookingRingService.instance.cancelBookingNotification(id);
+    if (id != null && id.isNotEmpty)
+      BookingRingService.instance.cancelBookingNotification(id);
   }
 
   /// Notification taps: "booking:<id>" opens the offer, "chat:<id>" the chat.
@@ -226,6 +301,10 @@ class BookingAlertService {
 
   /// Called on logout so the next driver does not inherit this session.
   void disconnect() {
+    _sessionGeneration++;
+    _recoveryTimer?.cancel();
+    _recoveryTimer = null;
+    _seenOffer = null;
     stopRinging();
     dismissAlert();
     _refreshListeners.clear();
@@ -279,24 +358,30 @@ class BookingAlertService {
                       color: AppColors.appColor.withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(Icons.notifications_active,
-                        color: AppColors.appColor, size: 24),
+                    child: Icon(
+                      Icons.notifications_active,
+                      color: AppColors.appColor,
+                      size: 24,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       'new_booking'.tr,
                       style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                   if (fare > 0)
                     Text(
                       '₹${fare.toStringAsFixed(0)}',
                       style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.appColor),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.appColor,
+                      ),
                     ),
                 ],
               ),
@@ -308,9 +393,10 @@ class BookingAlertService {
               ],
               if (vehicle.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Text(vehicle,
-                    style:
-                        TextStyle(fontSize: 12.5, color: HexColor('#6B7280'))),
+                Text(
+                  vehicle,
+                  style: TextStyle(fontSize: 12.5, color: HexColor('#6B7280')),
+                ),
               ],
               const SizedBox(height: 18),
               ElevatedButton(
@@ -318,20 +404,26 @@ class BookingAlertService {
                   backgroundColor: AppColors.appColor,
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   elevation: 0,
                 ),
                 onPressed: () => _openBooking(bookingId),
-                child: const Text('View Booking',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700)),
+                child: const Text(
+                  'View Booking',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
               TextButton(
                 onPressed: dismissAlert,
-                child:
-                    Text('Dismiss', style: TextStyle(color: HexColor('#6B7280'))),
+                child: Text(
+                  'Dismiss',
+                  style: TextStyle(color: HexColor('#6B7280')),
+                ),
               ),
             ],
           ),
@@ -355,10 +447,12 @@ class BookingAlertService {
         ),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(text,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, height: 1.35)),
+          child: Text(
+            text,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13, height: 1.35),
+          ),
         ),
       ],
     );

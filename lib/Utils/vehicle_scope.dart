@@ -25,7 +25,7 @@ class VehicleScopeOption {
     return VehicleScopeOption(
       id: (json['_id'] ?? json['id'] ?? '').toString(),
       vehicleNumber: (json['vehicleNumber'] ?? '').toString(),
-      isActive: json['isPrimary'] == true || json['isActive'] == true,
+      isActive: json['isPrimary'] == true,
       status: (json['verificationStatus'] ?? '').toString(),
     );
   }
@@ -95,7 +95,9 @@ Future<bool> showVehicleScopeSheet(BuildContext context) async {
       borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
     ),
     builder: (ctx) {
-      final current = scope.allVehicles ? 'ALL' : (scope.vehicleId ?? scope.activeVehicleId);
+      final current = scope.allVehicles
+          ? 'ALL'
+          : (scope.vehicleId ?? scope.activeVehicleId);
       Widget row({
         required String title,
         String? subtitle,
@@ -104,10 +106,20 @@ Future<bool> showVehicleScopeSheet(BuildContext context) async {
         IconData icon = Icons.local_shipping_outlined,
       }) {
         return ListTile(
-          leading: Icon(icon, color: selected ? Theme.of(ctx).primaryColor : Colors.grey.shade600),
-          title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: subtitle == null ? null : Text(subtitle, style: const TextStyle(fontSize: 12)),
-          trailing: selected ? Icon(Icons.check_circle, color: Theme.of(ctx).primaryColor) : null,
+          leading: Icon(
+            icon,
+            color: selected ? Theme.of(ctx).primaryColor : Colors.grey.shade600,
+          ),
+          title: Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          subtitle: subtitle == null
+              ? null
+              : Text(subtitle, style: const TextStyle(fontSize: 12)),
+          trailing: selected
+              ? Icon(Icons.check_circle, color: Theme.of(ctx).primaryColor)
+              : null,
           onTap: onTap,
         );
       }
@@ -121,17 +133,27 @@ Future<bool> showVehicleScopeSheet(BuildContext context) async {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text('select_vehicle'.tr,
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    child: Text(
+                      'select_vehicle'.tr,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
-                  IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                  IconButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(Icons.close),
+                  ),
                 ],
               ),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text('vehicle_scope_hint'.tr,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+              child: Text(
+                'vehicle_scope_hint'.tr,
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
             ),
             const SizedBox(height: 8),
             ...scope.vehicles.map(
@@ -198,7 +220,9 @@ class VehicleScopeChip extends StatelessWidget {
             decoration: BoxDecoration(
               color: bg,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: light ? Colors.white54 : const Color(0xFFC7D2FE)),
+              border: Border.all(
+                color: light ? Colors.white54 : const Color(0xFFC7D2FE),
+              ),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -207,7 +231,11 @@ class VehicleScopeChip extends StatelessWidget {
                 const SizedBox(width: 6),
                 Text(
                   scope.label,
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: fg,
+                  ),
                 ),
                 const SizedBox(width: 2),
                 Icon(Icons.keyboard_arrow_down, size: 16, color: fg),

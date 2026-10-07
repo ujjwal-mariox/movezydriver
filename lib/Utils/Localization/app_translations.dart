@@ -82,7 +82,7 @@ class AppTranslations extends Translations {
     'payment': 'Payment',
     'help_support': 'Help',
     'raise_ticket': 'Ticket',
-    'at_pickup': 'At Pickup',
+    'at_pickup': 'Arrived at Pickup',
 
     // Profile
     'my_profile': 'My Profile',

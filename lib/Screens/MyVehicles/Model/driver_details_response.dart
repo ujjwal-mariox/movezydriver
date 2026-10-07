@@ -1,9 +1,11 @@
 import 'dart:convert';
 
 /// "2027-03-31T00:00:00.000Z" → "2027-03-31"; dates are shown, never computed on.
-String? _dateOnly(dynamic v) => v == null ? null : v.toString().split('T').first;
+String? _dateOnly(dynamic v) =>
+    v == null ? null : v.toString().split('T').first;
 
-DriverDetailsResponse driverDetailsResponseFromJson(String str) => DriverDetailsResponse.fromJson(json.decode(str));
+DriverDetailsResponse driverDetailsResponseFromJson(String str) =>
+    DriverDetailsResponse.fromJson(json.decode(str));
 
 class DriverDetailsResponse {
   int? code;
@@ -32,6 +34,7 @@ class DriverDetailsResponse {
 class Data {
   List<VehicleItem>? vehicles;
   DriverInfo? driver;
+
   /// The vehicle currently taking bookings (isPrimary), if any.
   String? activeVehicleId;
 
@@ -43,7 +46,9 @@ class Data {
           .map((v) => VehicleItem.fromJson(v))
           .toList();
     }
-    driver = json['driver'] != null ? DriverInfo.fromJson(json['driver']) : null;
+    driver = json['driver'] != null
+        ? DriverInfo.fromJson(json['driver'])
+        : null;
     activeVehicleId = json['activeVehicleId']?.toString();
   }
 
@@ -63,6 +68,7 @@ class VehicleItem {
   String? id;
   String? vehicleNumber;
   String? vehicleType;
+  String? vehicleTypeId;
   String? vehicleBodyType;
   String? fuelType;
   String? rcFrontImage;
@@ -78,6 +84,7 @@ class VehicleItem {
   String? verificationStatus;
   bool? isPrimary;
   bool? isActive;
+
   /// Taken off dispatch by the document-expiry check (RC / insurance / PUC).
   bool? dispatchBlocked;
   List<String>? dispatchReasons;
@@ -109,6 +116,9 @@ class VehicleItem {
     id = json['_id'];
     vehicleNumber = json['vehicleNumber'];
     vehicleType = json['vehicleType'];
+    final catalogType = json['vehicleTypeId'];
+    vehicleTypeId = (catalogType is Map ? catalogType['_id'] : catalogType)
+        ?.toString();
     vehicleBodyType = json['vehicleBodyType'];
     fuelType = json['fuelType'];
     rcFrontImage = json['rcFrontImage'];
@@ -164,7 +174,12 @@ class DriverInfo {
   bool? onboardingFeePaid;
   String? profilePhoto;
 
-  DriverInfo({this.fullName, this.mobileNumber, this.onboardingFeePaid, this.profilePhoto});
+  DriverInfo({
+    this.fullName,
+    this.mobileNumber,
+    this.onboardingFeePaid,
+    this.profilePhoto,
+  });
 
   DriverInfo.fromJson(Map<String, dynamic> json) {
     fullName = json['fullName'];

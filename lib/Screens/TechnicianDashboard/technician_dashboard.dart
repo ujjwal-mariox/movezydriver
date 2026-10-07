@@ -43,6 +43,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
   DriverDashboardData? _dashboard;
   bool _isLoading = true;
   bool _isUpdatingStatus = false;
+  int _dashboardRequest = 0;
   String _error = '';
 
   // What customers said about this driver. The design has a Reviews section
@@ -92,10 +93,6 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
         break;
       }
     }
-    if (match == null && pending.length == 1) {
-      // Refresh raced the socket event: a single pending offer is that offer.
-      match = pending.first;
-    }
     if (match != null) {
       await pushTo(context, TakeBookingsScreen(booking: match));
       _loadDashboard(showLoader: false);
@@ -114,9 +111,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     Get.until((route) => route.isFirst);
     // The refresh fired when the socket event arrived; give it a beat if it
     // has not landed yet.
-    if ((_dashboard?.bookings.pending ?? []).isEmpty) {
-      await _loadDashboard(showLoader: false);
-    }
+    await _loadDashboard(showLoader: false);
     if (!mounted) return;
     await _openIncomingBookingAlertTarget(bookingId);
   }
@@ -152,7 +147,8 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     _loadDashboard(showLoader: false);
   }
 
-  Future<void> _loadDashboard({bool showLoader = true}) async {
+  Future<void> _loadDashboard({bool showLoader = true, bool ensureTracking = true}) async {
+    final request = ++_dashboardRequest;
     if (showLoader) {
       setState(() {
         _isLoading = true;
@@ -160,7 +156,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
       });
     }
     final response = await _api.fetchDashboard();
-    if (!mounted) return;
+    if (!mounted || request != _dashboardRequest) return;
     if (response?.code == 1 && response?.data != null) {
       setState(() {
         _dashboard = response!.data;
@@ -181,8 +177,10 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
       });
 
       // Start location tracking if driver is already online
-      if (response!.data!.driver.isOnline) {
-        LocationTrackingService.instance.startTracking();
+      if (response!.data!.driver.isOnline && ensureTracking) {
+        await _ensureTracking();
+      } else if (!response.data!.driver.isOnline) {
+        LocationTrackingService.instance.stopTracking();
       }
       return;
     }
@@ -213,9 +211,9 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     // Vibrate on status change
     HapticFeedback.heavyImpact();
 
+    try {
     final response = await _api.updateOnlineStatus(isOnline: !driver.isOnline);
     if (!mounted) return;
-    setState(() => _isUpdatingStatus = false);
     showCustomToast(
       context,
       response?.message.isNotEmpty == true
@@ -226,13 +224,25 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
       // Start or stop location tracking based on new status
       if (!driver.isOnline) {
         // Was offline, now going online
-        LocationTrackingService.instance.startTracking();
+        await _ensureTracking();
       } else {
         // Was online, now going offline
         LocationTrackingService.instance.stopTracking();
       }
       await _loadDashboard(showLoader: false);
     }
+    } finally {
+      if (mounted) setState(() => _isUpdatingStatus = false);
+    }
+  }
+
+  Future<void> _ensureTracking() async {
+    if (await LocationTrackingService.instance.startTracking()) return;
+    await _api.updateOnlineStatus(isOnline: false);
+    if (!mounted) return;
+    showCustomToast(context, 'Unable to stay online. Please enable location and background permissions, then try again.');
+    // An unsuccessful offline request must not recursively restart tracking.
+    await _loadDashboard(showLoader: false, ensureTracking: false);
   }
 
   /// Prompt shown when a driver tries to go online with training unfinished.

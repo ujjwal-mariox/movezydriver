@@ -252,7 +252,7 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
     setState(() => _applyingReferralVehicleId = vehicle.id);
 
     try {
-      final data = await _apiService.applyReferral(
+      await _apiService.applyReferral(
         vehicleId: vehicle.id!,
         referralCode: code,
       );
@@ -660,6 +660,15 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
                   ),
                 ),
             ],
+          ),
+          TextButton.icon(
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            label: const Text('Edit Vehicle'),
+            onPressed: vehicle.id == null ? null : () async {
+              await pushTo(context, AddVehicleDetailsScreen(
+                isOnboarding: false, existingVehicle: vehicle));
+              if (mounted) await _fetchVehicles();
+            },
           ),
           // Driver name + phone.
           // Interpolating both unconditionally printed a bare ", " on every

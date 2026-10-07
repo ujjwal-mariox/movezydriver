@@ -19,7 +19,8 @@ class BookingRingService {
   static const String _bookingChannelId = 'booking_requests_v2';
   static const String _chatChannelId = 'chat_messages_v1';
 
-  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
   AudioPlayer? _player;
   bool _initialised = false;
   bool _ringing = false;
@@ -29,9 +30,9 @@ class BookingRingService {
 
   bool get isRinging => _ringing;
 
-  Future<void> init() async {
+  Future<void> init({bool handleLaunch = true}) async {
     if (_initialised) return;
-    _initialised = true;
+
     try {
       const android = AndroidInitializationSettings('@mipmap/ic_launcher');
       const ios = DarwinInitializationSettings(
@@ -48,7 +49,9 @@ class BookingRingService {
       );
 
       final androidImpl = _notifications
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >();
       if (androidImpl != null) {
         // Android caches a channel's sound forever; a new id is the only way
         // to change it, hence the version suffix.
@@ -74,10 +77,16 @@ class BookingRingService {
       }
 
       // App opened from a notification while it was killed.
+      _initialised = true;
+      if (!handleLaunch) return;
       final launch = await _notifications.getNotificationAppLaunchDetails();
       final p = launch?.notificationResponse?.payload;
-      if (launch?.didNotificationLaunchApp == true && p != null && p.isNotEmpty) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => onNotificationTap?.call(p));
+      if (launch?.didNotificationLaunchApp == true &&
+          p != null &&
+          p.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => onNotificationTap?.call(p),
+        );
       }
     } catch (e) {
       debugPrint('ring: notification init failed: $e');
@@ -88,7 +97,9 @@ class BookingRingService {
     if (!Platform.isAndroid) return;
     try {
       await _notifications
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
           ?.requestNotificationsPermission();
     } catch (_) {}
   }
@@ -113,19 +124,30 @@ class BookingRingService {
     } catch (_) {}
   }
 
-  static int _idFor(String payload) => payload.hashCode & 0x7fffffff;
+  // The foreground-service isolate must cancel the same notification as the
+  // UI isolate, including after an app restart.
+  static int _idFor(String payload) {
+    var hash = 0;
+    for (final code in payload.codeUnits) {
+      hash = (hash * 31 + code) & 0x7fffffff;
+    }
+    return hash;
+  }
 
   Future<void> showBookingNotification({
     required String bookingId,
     required String pickup,
     double fare = 0,
+    Duration? expiresIn,
   }) async {
     try {
       await _notifications.show(
         id: _idFor('booking:$bookingId'),
         title: 'New booking request',
-        body: [if (fare > 0) '₹${fare.toStringAsFixed(0)}', if (pickup.isNotEmpty) 'Pickup: $pickup']
-            .join(' · '),
+        body: [
+          if (fare > 0) '₹${fare.toStringAsFixed(0)}',
+          if (pickup.isNotEmpty) 'Pickup: $pickup',
+        ].join(' · '),
         notificationDetails: NotificationDetails(
           android: AndroidNotificationDetails(
             _bookingChannelId,
@@ -140,8 +162,12 @@ class BookingRingService {
             enableVibration: true,
             ticker: 'New booking request',
             autoCancel: true,
+            timeoutAfter: expiresIn?.inMilliseconds,
           ),
-          iOS: const DarwinNotificationDetails(presentSound: true, presentAlert: true),
+          iOS: const DarwinNotificationDetails(
+            presentSound: true,
+            presentAlert: true,
+          ),
         ),
         payload: 'booking:$bookingId',
       );
@@ -169,13 +195,17 @@ class BookingRingService {
           android: AndroidNotificationDetails(
             _chatChannelId,
             'Customer messages',
-            channelDescription: 'Messages from the customer on your current trip',
+            channelDescription:
+                'Messages from the customer on your current trip',
             importance: Importance.high,
             priority: Priority.high,
             category: AndroidNotificationCategory.message,
             autoCancel: true,
           ),
-          iOS: DarwinNotificationDetails(presentSound: true, presentAlert: true),
+          iOS: DarwinNotificationDetails(
+            presentSound: true,
+            presentAlert: true,
+          ),
         ),
         payload: 'chat:$bookingId',
       );

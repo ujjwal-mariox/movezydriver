@@ -17,7 +17,6 @@ class SliderButtonWidget extends StatelessWidget {
   final Border? border;
   final Color? arrowColor;
 
-
   const SliderButtonWidget({
     super.key,
     this.onTap,
@@ -33,16 +32,15 @@ class SliderButtonWidget extends StatelessWidget {
     this.isEnabled,
     this.showBorder,
     this.border,
-    this.arrowColor
+    this.arrowColor,
   });
 
   @override
   Widget build(BuildContext context) {
-
     const Color cardBorder = Color(0xFFE6EEF2);
 
     return InkWell(
-      onTap: onTap ?? () {},
+      onTap: isEnabled == false ? null : onTap,
       splashColor: Colors.transparent,
       highlightColor: Colors.transparent,
       child: Container(
@@ -51,13 +49,13 @@ class SliderButtonWidget extends StatelessWidget {
         margin: margin ?? const EdgeInsets.all(0),
         height: height ?? 50,
         decoration: BoxDecoration(
-            // Brand orange default, matching ButtonWidget. The only caller
-            // ("At Pickup") passes appColor explicitly, so this was not visibly
-            // wrong — but a green default in an orange app is the same trap that
-            // turned the primary buttons green.
-            color: backgroundColor ?? AppColors.appColor,
-            borderRadius: borderRadius ?? BorderRadius.circular(20),
-            border: border
+          // Brand orange default, matching ButtonWidget. The only caller
+          // ("At Pickup") passes appColor explicitly, so this was not visibly
+          // wrong — but a green default in an orange app is the same trap that
+          // turned the primary buttons green.
+          color: backgroundColor ?? AppColors.appColor,
+          borderRadius: borderRadius ?? BorderRadius.circular(20),
+          border: border,
         ),
         child: Row(
           children: [
@@ -71,24 +69,30 @@ class SliderButtonWidget extends StatelessWidget {
                 border: Border.all(color: cardBorder),
               ),
               child: Center(
-                child: Icon(Icons.keyboard_double_arrow_right, color: arrowColor, size: 28,),
+                child: Icon(
+                  Icons.keyboard_double_arrow_right,
+                  color: arrowColor,
+                  size: 28,
+                ),
               ),
             ),
 
-            Spacer(),
-
-            Text(
-              text,
-              style: textStyle ??
-                  TextStyle(
+            Expanded(
+              child: Text(
+                text,
+                maxLines: 2,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    textStyle ??
+                    TextStyle(
                       color: textColor ?? Colors.white,
                       fontSize: 16,
-                      fontWeight: FontWeight.w500),
+                      fontWeight: FontWeight.w500,
+                    ),
+              ),
             ),
-
-            Spacer(),
-
-            SizedBox(width: 58,)
+            const SizedBox(width: 12),
           ],
         ),
       ),
