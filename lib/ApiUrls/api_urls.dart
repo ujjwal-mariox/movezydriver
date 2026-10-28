@@ -73,6 +73,9 @@ class ApiUrls {
 
   static String driverProfileUrl = "$baseUrlApi/driver/app/profile";
 
+  // Renewed driving licence: new photo + expiry date.
+  static String renewLicenceUrl = "$baseUrlApi/driver/app/licence";
+
   static String driverProfilePhotoUrl = "$baseUrlApi/driver/app/profile/photo";
 
   static String driverLanguageUrl = "$baseUrlApi/driver/app/profile/language";
@@ -143,6 +146,8 @@ class ApiUrls {
   static String myVehiclesUrl = "$baseUrlApi/driver/app/my-vehicles";
   // One active vehicle per partner: this one takes bookings, the rest go idle.
   static String activateVehicleUrl(String vehicleId) => "$baseUrlApi/driver/app/my-vehicles/$vehicleId/activate";
+  // Renewed RC / insurance / PUC dates for one vehicle (no re-approval).
+  static String vehicleDocumentsUrl(String vehicleId) => "$baseUrlApi/driver/app/my-vehicles/$vehicleId/documents";
 
   // Onboarding Fee
   static String onboardingFeeUrl = "$baseUrlApi/driver/app/onboarding-fee";

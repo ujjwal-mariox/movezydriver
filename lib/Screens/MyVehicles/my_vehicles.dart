@@ -7,6 +7,7 @@ import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/CommonWidgets/button_widget.dart';
 import 'package:movezy_driver_app/Screens/HelpSupportScreen/help_support_screen.dart';
 import 'package:movezy_driver_app/Screens/MyVehicles/Model/driver_details_response.dart';
+import 'package:movezy_driver_app/Screens/MyVehicles/update_vehicle_documents_screen.dart';
 import 'package:movezy_driver_app/Screens/MyVehicles/my_vehicles_api_service.dart';
 import 'package:movezy_driver_app/Screens/VerificationScreen/verification_screen.dart';
 import 'package:movezy_driver_app/Screens/on_boarding_screens/add_vehicle_details_screen.dart';
@@ -661,14 +662,33 @@ class _MyVehiclesScreenState extends State<MyVehiclesScreen> {
                 ),
             ],
           ),
-          TextButton.icon(
-            icon: const Icon(Icons.edit_outlined, size: 18),
-            label: const Text('Edit Vehicle'),
-            onPressed: vehicle.id == null ? null : () async {
-              await pushTo(context, AddVehicleDetailsScreen(
-                isOnboarding: false, existingVehicle: vehicle));
-              if (mounted) await _fetchVehicles();
-            },
+          Wrap(
+            spacing: 4,
+            children: [
+              // Brand orange; unstyled these took the default Material purple.
+              TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: AppColors.appColor),
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text('Edit Vehicle'),
+                onPressed: vehicle.id == null ? null : () async {
+                  await pushTo(context, AddVehicleDetailsScreen(
+                    isOnboarding: false, existingVehicle: vehicle));
+                  if (mounted) await _fetchVehicles();
+                },
+              ),
+              // Renewed RC / insurance / PUC dates without the re-approval
+              // that Edit Vehicle triggers.
+              TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: AppColors.appColor),
+                icon: const Icon(Icons.event_available_outlined, size: 18),
+                label: Text('update_documents'.tr),
+                onPressed: vehicle.id == null ? null : () async {
+                  final saved = await pushTo(
+                      context, UpdateVehicleDocumentsScreen(vehicle: vehicle));
+                  if (saved == true && mounted) await _fetchVehicles();
+                },
+              ),
+            ],
           ),
           // Driver name + phone.
           // Interpolating both unconditionally printed a bare ", " on every

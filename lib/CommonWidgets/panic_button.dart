@@ -8,8 +8,10 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
 
-/// A dedicated Panic Button widget for use during active trips.
-/// Long-press to activate emergency alert.
+/// The SOS button for active trips (pickup, OTP and in-trip screens).
+/// Tap opens a confirm sheet — "Send SOS alert" or "Call 112" — so an alert
+/// needs two deliberate taps but no hidden gesture. It used to need a
+/// long-press, so a normal tap did nothing and drivers reported SOS as broken.
 class PanicButton extends StatefulWidget {
   /// Booking ID for the active trip (optional — SOS works without it).
   final String? bookingId;
@@ -38,6 +40,23 @@ class _PanicButtonState extends State<PanicButton> with SingleTickerProviderStat
   void dispose() {
     _pulseController.dispose();
     super.dispose();
+  }
+
+  Future<void> _onTap() async {
+    HapticFeedback.mediumImpact();
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => const _SosConfirmSheet(),
+    );
+    if (!mounted) return;
+    if (choice == 'send') {
+      await _onPanicActivated();
+    } else if (choice == 'call') {
+      await _call112();
+    }
   }
 
   Future<void> _onPanicActivated() async {
@@ -71,17 +90,22 @@ class _PanicButtonState extends State<PanicButton> with SingleTickerProviderStat
       // position so a GPS glitch doesn't kill the emergency alert entirely.
       Position? position;
       try {
-        final permission = await Geolocator.checkPermission();
-        if (permission == LocationPermission.denied ||
-            permission == LocationPermission.deniedForever) {
-          await Geolocator.requestPermission();
-        }
-        position = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-            timeLimit: Duration(seconds: 8),
-          ),
-        );
+        // One overall limit: an emergency alert must never spin forever on a
+        // permission check or GPS fix that does not answer.
+        position = await () async {
+          final permission = await Geolocator.checkPermission();
+          if (permission == LocationPermission.denied ||
+              permission == LocationPermission.deniedForever) {
+            await Geolocator.requestPermission();
+          }
+          return Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 8),
+            ),
+          );
+        }()
+            .timeout(const Duration(seconds: 12));
       } catch (_) {
         position = null;
       }
@@ -125,13 +149,7 @@ class _PanicButtonState extends State<PanicButton> with SingleTickerProviderStat
       builder: (context, child) {
         final pulseValue = _pulseController.value;
         return GestureDetector(
-          onLongPress: () {
-            setState(() => _isPressed = true);
-            _onPanicActivated();
-            Future.delayed(const Duration(milliseconds: 500), () {
-              if (mounted) setState(() => _isPressed = false);
-            });
-          },
+          onTap: _onTap,
           onTapDown: (_) => setState(() => _isPressed = true),
           onTapUp: (_) => setState(() => _isPressed = false),
           onTapCancel: () => setState(() => _isPressed = false),
@@ -171,6 +189,97 @@ class _PanicButtonState extends State<PanicButton> with SingleTickerProviderStat
           ),
         );
       },
+    );
+  }
+}
+
+Future<void> _call112() async {
+  final dialer = Uri(scheme: 'tel', path: '112');
+  if (await canLaunchUrl(dialer)) {
+    await launchUrl(dialer);
+  }
+}
+
+/// Step two of SOS: what to do. Returns 'send', 'call' or null (dismissed).
+class _SosConfirmSheet extends StatelessWidget {
+  const _SosConfirmSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    const red = Color(0xFFDC2626);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Row(
+              children: [
+                Icon(Icons.emergency, color: red, size: 28),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text('Emergency SOS',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Sending an alert shares your live location with the Movezy '
+              'safety team straight away. If anyone is in danger, call 112.',
+              style: TextStyle(fontSize: 13, height: 1.4, color: Colors.black87),
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context, 'send'),
+                icon: const Icon(Icons.campaign_outlined),
+                label: const Text('Send SOS alert',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: red,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: OutlinedButton.icon(
+                onPressed: () => Navigator.pop(context, 'call'),
+                icon: const Icon(Icons.phone, color: red),
+                label: const Text('Call 112',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w700, color: red)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: red, width: 1.4),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel',
+                  style: TextStyle(color: Colors.black54)),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -254,12 +363,7 @@ class _SosDialogState extends State<_SosDialog> {
           child: const Text('Close'),
         ),
         ElevatedButton.icon(
-          onPressed: () async {
-            final dialer = Uri(scheme: 'tel', path: '112');
-            if (await canLaunchUrl(dialer)) {
-              await launchUrl(dialer);
-            }
-          },
+          onPressed: _call112,
           icon: const Icon(Icons.phone, size: 18),
           label: const Text('Call 112'),
           style: ElevatedButton.styleFrom(

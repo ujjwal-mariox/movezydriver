@@ -28,7 +28,7 @@ class DriverReview {
         customerName: (j['customerName'] ?? 'Customer').toString(),
         customerPhoto: (j['customerPhoto'] ?? '').toString(),
         ratedAt:
-            j['ratedAt'] != null ? DateTime.tryParse(j['ratedAt'].toString()) : null,
+            j['ratedAt'] != null ? DateTime.tryParse(j['ratedAt'].toString())?.toLocal() : null,
       );
 }
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:movezy_driver_app/Screens/MyVehicles/my_vehicles_api_service.dart';
+import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
 
 /// One vehicle at a time.
 ///
@@ -85,10 +87,66 @@ class VehicleScope {
   }
 }
 
-/// Returns true when the selection changed.
-Future<bool> showVehicleScopeSheet(BuildContext context) async {
+/// Makes [v] the active vehicle after the partner confirms — the home
+/// screen's switcher. Same server rules as My Vehicles → Set as active
+/// (approved, fee paid, documents valid, not mid-trip); a refusal shows the
+/// server's reason. Returns true when the vehicle was switched.
+Future<bool> _confirmAndActivate(
+  BuildContext context,
+  VehicleScopeOption v,
+) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text('switch_vehicle_title'.trParams({'number': v.vehicleNumber})),
+      content: Text('switch_vehicle_body'.tr),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: Text('cancel'.tr,
+              style: const TextStyle(color: Colors.black54)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text('switch_vehicle'.tr,
+              style: TextStyle(
+                  color: AppColors.appColor, fontWeight: FontWeight.w700)),
+        ),
+      ],
+    ),
+  );
+  if (ok != true || !context.mounted) return false;
+  try {
+    final res = await MyVehiclesApiService().activateVehicle(v.id);
+    VehicleScope.instance.reset();
+    if (context.mounted) {
+      final msg = res['message']?.toString() ?? '';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg.isNotEmpty ? msg : 'vehicle_activated'.tr)),
+      );
+    }
+    return true;
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
+    }
+    return false;
+  }
+}
+
+/// Returns true when the selection changed. With [activateOnSelect] (the
+/// home screen) picking a vehicle switches the ACTIVE vehicle — the one that
+/// takes bookings — instead of only filtering the figures; "All vehicles"
+/// stays a view of the totals.
+Future<bool> showVehicleScopeSheet(
+  BuildContext context, {
+  bool activateOnSelect = false,
+}) async {
   final scope = VehicleScope.instance;
   final before = '${scope.vehicleId}|${scope.allVehicles}';
+  VehicleScopeOption? toActivate;
   await showModalBottomSheet<void>(
     context: context,
     shape: const RoundedRectangleBorder(
@@ -151,7 +209,9 @@ Future<bool> showVehicleScopeSheet(BuildContext context) async {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Text(
-                'vehicle_scope_hint'.tr,
+                activateOnSelect
+                    ? 'vehicle_switch_hint'.tr
+                    : 'vehicle_scope_hint'.tr,
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               ),
             ),
@@ -162,6 +222,11 @@ Future<bool> showVehicleScopeSheet(BuildContext context) async {
                 subtitle: v.isActive ? 'active_vehicle'.tr : null,
                 selected: !scope.allVehicles && v.id == current,
                 onTap: () {
+                  if (activateOnSelect && !v.isActive) {
+                    toActivate = v;
+                    Navigator.pop(ctx);
+                    return;
+                  }
                   scope.allVehicles = false;
                   scope.vehicleId = v.id;
                   Navigator.pop(ctx);
@@ -184,6 +249,10 @@ Future<bool> showVehicleScopeSheet(BuildContext context) async {
       );
     },
   );
+  final pending = toActivate;
+  if (pending != null && context.mounted) {
+    return _confirmAndActivate(context, pending);
+  }
   return before != '${scope.vehicleId}|${scope.allVehicles}';
 }
 
@@ -194,11 +263,15 @@ class VehicleScopeChip extends StatelessWidget {
   final double trailingGap;
   final bool light;
 
+  /// Home screen: picking a vehicle makes it the active one.
+  final bool activateOnSelect;
+
   const VehicleScopeChip({
     super.key,
     required this.onChanged,
     this.trailingGap = 0,
     this.light = false,
+    this.activateOnSelect = false,
   });
 
   @override
@@ -213,7 +286,10 @@ class VehicleScopeChip extends StatelessWidget {
         InkWell(
           borderRadius: BorderRadius.circular(20),
           onTap: () async {
-            if (await showVehicleScopeSheet(context)) onChanged();
+            if (await showVehicleScopeSheet(context,
+                activateOnSelect: activateOnSelect)) {
+              onChanged();
+            }
           },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

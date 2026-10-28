@@ -42,8 +42,9 @@ class ChatMessage {
       message: json['message']?.toString() ?? '',
       imageUrl: json['imageUrl']?.toString(),
       clientMessageId: json['clientMessageId']?.toString(),
+      // UTC from the server; local so message times read as the phone's clock.
       createdAt: json['createdAt'] != null
-          ? DateTime.parse(json['createdAt'].toString())
+          ? DateTime.parse(json['createdAt'].toString()).toLocal()
           : DateTime.now(),
     );
   }

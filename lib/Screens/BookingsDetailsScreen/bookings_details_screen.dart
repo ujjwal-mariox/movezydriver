@@ -411,6 +411,7 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
           earningsIsGross: booking.estimatedEarnings <= 0,
           scheduledAt: booking.scheduledAt,
           createdAt: booking.createdAt,
+          customerName: booking.customerName,
         ),
       );
     } else {

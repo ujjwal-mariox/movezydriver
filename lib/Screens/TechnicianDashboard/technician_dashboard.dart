@@ -504,6 +504,9 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
                     const Spacer(),
                     VehicleScopeChip(
                       trailingGap: 8,
+                      // Home: switching here activates the vehicle (client
+                      // feedback) — it used to only filter the numbers.
+                      activateOnSelect: true,
                       onChanged: () => _loadDashboard(showLoader: false),
                     ),
                     _ratingChip(),
@@ -1203,6 +1206,7 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
                     earningsIsGross: booking.estimatedEarnings <= 0,
                     scheduledAt: booking.scheduledAt,
                     createdAt: booking.createdAt,
+                    customerName: booking.customerName,
                   ),
                 );
                 break;

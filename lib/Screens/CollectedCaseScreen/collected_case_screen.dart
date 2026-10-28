@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:movezy_driver_app/CommonWidgets/panic_button.dart';
 import 'package:movezy_driver_app/Screens/ChatScreen/chat_screen.dart';
 import 'package:movezy_driver_app/CommonWidgets/trip_support_sheet.dart';
 import 'package:movezy_driver_app/Services/masked_call_service.dart';
@@ -887,6 +888,13 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
                       right: 16,
                       child: _addressChip(),
                     ),
+                  // SOS during the ride itself (it was only on the pickup
+                  // screen). Bottom-right of the map, clear of the address chip.
+                  Positioned(
+                    right: 16,
+                    bottom: 16,
+                    child: PanicButton(bookingId: widget.bookingId),
+                  ),
                 ],
               ),
             ),

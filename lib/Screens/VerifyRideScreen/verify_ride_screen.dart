@@ -1,6 +1,9 @@
 import 'dart:ui';
+import 'package:movezy_driver_app/CommonWidgets/panic_button.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/Screens/CollectedCaseScreen/collected_case_screen.dart';
+import 'package:movezy_driver_app/Screens/ChatScreen/chat_screen.dart';
+import 'package:movezy_driver_app/Services/masked_call_service.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/technician_dashboard.dart';
 import 'package:flutter/material.dart';
 import 'package:hexcolor/hexcolor.dart';
@@ -31,6 +34,9 @@ class VerifyRideScreen extends StatefulWidget {
   final String? scheduledAt;
   final String? createdAt;
 
+  /// Shown in the chat header; the call itself is masked by booking id.
+  final String customerName;
+
   const VerifyRideScreen({
     super.key,
     required this.bookingId,
@@ -40,6 +46,7 @@ class VerifyRideScreen extends StatefulWidget {
     this.incentive,
     this.scheduledAt,
     this.createdAt,
+    this.customerName = 'Customer',
   });
   @override
   State<VerifyRideScreen> createState() => _VerifyRideScreenState();
@@ -195,6 +202,13 @@ class _VerifyRideScreenState extends State<VerifyRideScreen> {
             ),
           ),
 
+          // SOS while waiting at pickup, same button as the other trip screens.
+          Positioned(
+            right: 16,
+            top: MediaQuery.of(context).padding.top + 76,
+            child: PanicButton(bookingId: widget.bookingId),
+          ),
+
           // Bottom sheet.
           Align(
             alignment: Alignment.bottomCenter,
@@ -248,6 +262,38 @@ class _VerifyRideScreenState extends State<VerifyRideScreen> {
                               color: _grayShade2),
                         ),
                       ],
+                      const SizedBox(height: 12),
+                      // The customer has the OTP, and is often not at the
+                      // door when the driver arrives — this screen had no way
+                      // to reach them (only the in-trip screen did).
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _contactButton(
+                              icon: Icons.call_outlined,
+                              label: 'Call customer',
+                              onTap: () => MaskedCallService.callCustomer(
+                                  context, widget.bookingId),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _contactButton(
+                              icon: Icons.chat_bubble_outline,
+                              label: 'Chat',
+                              onTap: () => pushTo(
+                                context,
+                                ChatScreen(
+                                  bookingId: widget.bookingId,
+                                  customerName: widget.customerName.trim().isEmpty
+                                      ? 'Customer'
+                                      : widget.customerName,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 14),
                       Align(
                         alignment: Alignment.centerLeft,
@@ -379,6 +425,29 @@ class _VerifyRideScreenState extends State<VerifyRideScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _contactButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return OutlinedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 18, color: AppColors.appColor),
+      label: Text(
+        label,
+        style: TextStyle(
+            color: AppColors.appColor,
+            fontWeight: FontWeight.w600,
+            fontSize: 14),
+      ),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(44),
+        side: BorderSide(color: AppColors.appColor, width: 1.2),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }

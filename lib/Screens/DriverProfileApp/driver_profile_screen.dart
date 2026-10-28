@@ -17,6 +17,8 @@ import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
 import 'package:movezy_driver_app/Utils/ImageQualityValidator/image_quality_validator.dart';
 import 'package:movezy_driver_app/Screens/CropScreen/crop_screen.dart';
 import 'package:movezy_driver_app/Screens/DriverProfileApp/my_badge_screen.dart';
+import 'package:movezy_driver_app/Screens/DriverProfileApp/update_licence_screen.dart';
+import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 
 class DriverProfileScreen extends StatefulWidget {
   final DriverProfileBundle? initialProfile;
@@ -477,9 +479,37 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                           ? '•••• ${profile.license.number.trim().substring(profile.license.number.trim().length - 4)}'
                           : '••••',
                     ),
+                  // Renewal lives here: a photo of the new licence + its date.
                   LicenseRow(
                     label: 'DL Expiry Date',
                     value: _formatLicenseDate(profile.license.expiryDate),
+                    valueColor: _licenceExpired(profile.license.expiryDate)
+                        ? Colors.red
+                        : null,
+                    trailing: InkWell(
+                      onTap: () async {
+                        final saved = await pushTo(
+                          context,
+                          UpdateLicenceScreen(
+                            currentExpiry: profile.license.expiryDate.trim().isEmpty
+                                ? ''
+                                : _formatLicenseDate(profile.license.expiryDate),
+                          ),
+                        );
+                        if (saved == true && mounted) await _loadProfile();
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        child: Text(
+                          'update'.tr,
+                          style: TextStyle(
+                            color: AppColors.appColor,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                   LicenseRow(
                     label: 'Experience',
@@ -711,6 +741,13 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     return DateFormat('dd MMM yyyy').format(date.toLocal());
   }
 
+  bool _licenceExpired(String raw) {
+    final date = DateTime.tryParse(raw);
+    if (date == null) return false;
+    final now = DateTime.now();
+    return date.isBefore(DateTime(now.year, now.month, now.day));
+  }
+
   String _formatLicenseDate(String raw) {
     final date = DateTime.tryParse(raw);
     if (date == null) return _displayValue(raw);
@@ -830,8 +867,16 @@ class BadgeCard extends StatelessWidget {
 class LicenseRow extends StatelessWidget {
   final String label;
   final String value;
+  final Color? valueColor;
+  final Widget? trailing;
 
-  const LicenseRow({super.key, required this.label, required this.value});
+  const LicenseRow({
+    super.key,
+    required this.label,
+    required this.value,
+    this.valueColor,
+    this.trailing,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -854,9 +899,11 @@ class LicenseRow extends StatelessWidget {
           Expanded(
             child: Text(
               ':  $value',
-              style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                  color: valueColor ?? Colors.black87, fontWeight: FontWeight.w500),
             ),
           ),
+          if (trailing != null) trailing!,
         ],
       ),
     );

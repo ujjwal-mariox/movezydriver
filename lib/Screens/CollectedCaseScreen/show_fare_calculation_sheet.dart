@@ -66,19 +66,49 @@ class FareCalculationSheet extends StatelessWidget {
     final grandTotal = _num(b['finalFare'] ?? b['fare']);
     final hasData = grandTotal > 0 || subtotal > 0;
 
+    // Same rows, labels and order as the customer's Fare Breakup (Review
+    // Booking / trip screen), so driver and customer read one bill (client
+    // feedback: "fare calculation should be in sync"). Base + KM is spelled
+    // out with the km and rate it was priced from; every figure is the
+    // server's own.
+    final distanceKm = _num(b['distanceKm']);
+    final perKmRate = _num(b['perKmRate']);
+    final includedKm = _num(b['includedKm']);
+    final stopCharges = _num(b['stopCharges']);
+    final minimumAdj = _num(b['minimumFareAdjustment']);
+    final priced = perKmRate > 0 && distanceKm > 0;
+
     final rows = <Widget>[];
     void charge(String label, double value) {
-      if (value > 0.004) rows.add(_fareRow(label, "+ ${_money(value)}"));
+      if (value > 0.004) rows.add(_fareRow(label, _money(value)));
     }
 
     if (subtotal > 0) {
-      charge("Base Fare:", baseFare);
-      charge("Distance Charge:", distanceCharge);
-      charge("Time Charge:", timeCharge);
+      if (distanceKm > 0) {
+        rows.add(Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(
+            "Trip distance ${distanceKm.toStringAsFixed(2)} km (by road)",
+            style: const TextStyle(fontSize: 12, color: Color(0xFF6B7A90)),
+          ),
+        ));
+      }
       charge(
-          surgeMultiplier > 1 ? "Surge (x${_plain(surgeMultiplier)}):" : "Surge:",
+          priced && includedKm > 0
+              ? "Base fare (incl. first ${_plain(includedKm)} km)"
+              : "Base fare",
+          baseFare);
+      charge(
+          priced
+              ? "Distance ${(distanceKm - includedKm).clamp(0, double.infinity).toStringAsFixed(2)} km × ₹${_plain(perKmRate)}/km"
+              : "Distance",
+          distanceCharge);
+      // Only trips priced before the Base + KM rule carry a time charge.
+      charge("Time", timeCharge);
+      charge(surgeMultiplier > 1 ? "Surge (×${_plain(surgeMultiplier)})" : "Surge",
           surgeFare);
-      charge("Add-on Charges:", addonTotal);
+      charge("Extra stops", stopCharges);
+      charge("Add-on services", addonTotal);
 
       // Add-on names, no figures: a percentage-priced add-on stores `price` as
       // the percentage (Insurance = 2), so listing those as money would both
@@ -97,68 +127,78 @@ class FareCalculationSheet extends StatelessWidget {
       // Extras the server records but does not always bill: a waiting charge on
       // an already-paid booking is stored and deliberately left out of the
       // subtotal. Show them only when they account for the gap, so the rows
-      // keep summing to the Sub Total the customer was actually charged.
-      final itemised =
-          baseFare + distanceCharge + timeCharge + surgeFare + addonTotal;
+      // keep summing to the Subtotal the customer was actually charged.
+      final itemised = baseFare +
+          distanceCharge +
+          timeCharge +
+          surgeFare +
+          stopCharges +
+          addonTotal +
+          minimumAdj;
       final gap = subtotal - itemised;
       final extras =
           waitingCharge + tollCharges + parkingCharges + loadingCharge;
       if (extras > 0.004 && (gap - extras).abs() <= 0.01) {
         charge(
             waitingMinutes > 0
-                ? "Waiting Charge (${_plain(waitingMinutes)} min):"
-                : "Waiting Charge:",
+                ? "Waiting (${_plain(waitingMinutes)} min)"
+                : "Waiting",
             waitingCharge);
-        charge("Toll Charges:", tollCharges);
-        charge("Parking Charges:", parkingCharges);
-        charge("Loading / Unloading:", loadingCharge);
-      } else if (gap > 0.01) {
-        // Whatever the server put into the subtotal that isn't itemised above
-        // (e.g. a minimum-fare top-up). Derived from the server's own figures —
-        // never a made-up number — so the rows still reach the Sub Total.
-        charge("Other Charges:", gap);
+        charge("Tolls", tollCharges);
+        charge("Parking", parkingCharges);
+        charge("Loading & unloading", loadingCharge);
+      } else if (gap > 0.05) {
+        // Whatever the server put into the subtotal that isn't itemised above.
+        // Derived from the server's own figures — never a made-up number.
+        charge("Other charges", gap);
       }
+      charge("Minimum fare adjustment", minimumAdj);
 
-      rows.add(const SizedBox(height: 10));
+      rows.add(const SizedBox(height: 4));
       rows.add(const Divider(color: dividerColor, thickness: 1));
-      rows.add(_fareRow("Sub Total:", _money(subtotal),
+      rows.add(_fareRow("Subtotal", _money(subtotal),
           isBold: true, color: Colors.black));
     }
 
-    // GST and discounts apply to the Sub Total, so they belong below it.
+    // GST and discounts apply to the Subtotal, so they belong below it.
     if (gst > 0.004) {
       rows.add(_fareRow(
-          gstPercentage > 0 ? "GST (${_plain(gstPercentage)}%):" : "GST:",
-          "+ ${_money(gst)}"));
+          gstPercentage > 0 ? "GST (${_plain(gstPercentage)}%)" : "GST",
+          _money(gst)));
     }
+    // Same three discount lines the customer sees: promo, the automatic
+    // discount campaign (the rest of totalDiscount), and coins.
     if (discount > 0.004) {
-      // Itemise promo vs coins only when the two account for the whole
-      // discount; otherwise a single honest line.
-      if (promoDiscount > 0.004 &&
-          coinDiscount > 0.004 &&
-          (promoDiscount + coinDiscount - discount).abs() <= 0.01) {
+      final campaign = discount - promoDiscount - coinDiscount;
+      if (promoDiscount > 0.004) {
         rows.add(_fareRow(
-            promoCode.isNotEmpty ? "Promo ($promoCode):" : "Promo Discount:",
-            "- ${_money(promoDiscount)}"));
-        rows.add(_fareRow("Coin Discount:", "- ${_money(coinDiscount)}"));
-      } else {
-        rows.add(_fareRow("Discount:", "- ${_money(discount)}"));
+            promoCode.isNotEmpty ? "Discount ($promoCode)" : "Discount",
+            "-${_money(promoDiscount)}",
+            color: Colors.green.shade700));
+      }
+      if (campaign > 0.004) {
+        rows.add(_fareRow("Discount applied", "-${_money(campaign)}",
+            color: Colors.green.shade700));
+      }
+      if (coinDiscount > 0.004) {
+        rows.add(_fareRow("Movezy Coins", "-${_money(coinDiscount)}",
+            color: Colors.green.shade700));
       }
     }
 
     // Anything still unaccounted for between the rows above and the server's
-    // grand total. The total shown is always the server's — money is
-    // server-authoritative — and this line is the difference, so the receipt
+    // total. The total shown is always the server's — money is
+    // server-authoritative — and this line is the difference, so the bill
     // reconciles instead of silently disagreeing with itself.
     final adjustment = grandTotal - (subtotal + gst - discount);
     if (subtotal > 0 && adjustment.abs() > 0.01) {
-      rows.add(_fareRow("Adjustment:",
-          "${adjustment < 0 ? '- ' : '+ '}${_money(adjustment.abs())}"));
+      rows.add(_fareRow("Adjustment",
+          "${adjustment < 0 ? '-' : ''}${_money(adjustment.abs())}"));
     }
 
     rows.add(const SizedBox(height: 10));
     rows.add(const Divider(color: dividerColor, thickness: 1));
-    rows.add(_fareRow("Grand Total:", _money(grandTotal),
+    rows.add(_fareRow("Amount Payable", _money(grandTotal),
         isBold: true, color: Colors.black));
 
     return Stack(
@@ -193,7 +233,8 @@ class FareCalculationSheet extends StatelessWidget {
                     children: [
                       const Center(
                         child: Text(
-                          "Fare Calculations",
+                          // Same title as the customer's sheet.
+                          "Fare Breakup",
                           style: TextStyle(
                             color: darkBlue,
                             fontWeight: FontWeight.w700,

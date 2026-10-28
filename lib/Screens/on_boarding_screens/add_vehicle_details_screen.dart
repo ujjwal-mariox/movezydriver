@@ -11,6 +11,7 @@ import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/CommonWidgets/button_widget.dart';
 import 'package:movezy_driver_app/CommonWidgets/edit_text_controller.dart';
+import 'package:movezy_driver_app/CommonWidgets/expiry_date_tile.dart';
 import 'package:movezy_driver_app/Screens/AadharCaptureScreen/capture_screen.dart';
 import 'package:movezy_driver_app/Screens/on_boarding_screens/OnbordingApiService/on_boarding_api_service.dart';
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
@@ -65,9 +66,13 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
 
   /// Body types from System Configuration (non-2W); Open/Closed if the admin has none.
   List<String> _masterBodyTypes = [];
+  // Mandatory document dates (client rule): RC, insurance, and PUC unless the
+  // vehicle is electric — EVs are exempt from PUC, so it isn't asked.
   DateTime? _rcExpiry;
   DateTime? _insuranceExpiry;
   DateTime? _pucExpiry;
+  bool _showExpiryErrors = false;
+  bool get _pucExempt => (oilType ?? '').toLowerCase() == 'electric';
   bool isLoadingMasterData = true;
 
   // In-flight guard for Save & Continue. Without it a second tap posted a
@@ -162,13 +167,35 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
     return (t['categoryCode'] ?? '') == '2W';
   }
 
+  /// For a 2 Wheeler sub-category (Scooter / Bike) the body IS the
+  /// sub-category, so it is set from the chosen type — it used to be a second,
+  /// separate Scooter/Bike choice that could contradict the type (registered
+  /// as "Scooter", body "Bike") and so the rate the partner is dispatched at.
+  String? get _twoWheelerBody {
+    if (!_isTwoWheeler) return null;
+    final name = (vehicleTypeList.firstWhere(
+              (v) => v['id'] == vehicleTypeId,
+              orElse: () => const <String, String>{},
+            )['name'] ??
+            '')
+        .toLowerCase();
+    if (name.contains('scooter')) return 'Scooter';
+    if (name.contains('bike')) return 'Bike';
+    return null;
+  }
+
+  /// "2 Wheeler – Scooter": two-wheeler types are shown as sub-categories.
+  String _typeLabel(Map<String, String> v) =>
+      v['categoryCode'] == '2W' ? '2 Wheeler – ${v['name']}' : v['name']!;
+
   /// Two-wheelers are Scooter/Bike on Petrol or Electric; everything else keeps
   /// Open/Closed bodies and the full fuel list. A selection that no longer
   /// fits is cleared, so the server never sees a scooter tagged Diesel.
   void _applyTypeRules() {
     final twoW = _isTwoWheeler;
+    final fixedBody = _twoWheelerBody;
     final newBody = twoW
-        ? <String>['Scooter', 'Bike']
+        ? (fixedBody != null ? <String>[fixedBody] : <String>['Scooter', 'Bike'])
         : (_masterBodyTypes.isNotEmpty
               ? List<String>.of(_masterBodyTypes)
               : <String>['Open', 'Closed']);
@@ -182,6 +209,7 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
       bodyTypeList = newBody;
       if (bodyType != null && !newBody.contains(bodyType)) bodyType = null;
     }
+    if (fixedBody != null) bodyType = fixedBody;
     fuelTypeList = newFuel;
     if (oilType != null && !newFuel.contains(oilType)) oilType = null;
   }
@@ -199,73 +227,20 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
     }
   }
 
-  String? _fmtDate(DateTime? d) => d == null
-      ? null
-      : '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  /// Whether any required document date is still unset.
+  bool _expiryDatesMissing() =>
+      _rcExpiry == null ||
+      _insuranceExpiry == null ||
+      (!_pucExempt && _pucExpiry == null);
 
-  Future<void> _pickExpiry(
-    DateTime? current,
-    ValueChanged<DateTime?> onPicked,
-  ) async {
+  bool _anyExpiryPast() {
     final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: current ?? now,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 20),
-    );
-    if (picked != null && mounted) setState(() => onPicked(picked));
+    final today = DateTime(now.year, now.month, now.day);
+    return [_rcExpiry, _insuranceExpiry, if (!_pucExempt) _pucExpiry]
+        .any((d) => d != null && d.isBefore(today));
   }
 
-  Widget _expiryTile(
-    String label,
-    DateTime? value,
-    ValueChanged<DateTime?> onPicked,
-  ) {
-    return InkWell(
-      onTap: () => _pickExpiry(value, onPicked),
-      child: Container(
-        margin: const EdgeInsets.only(left: 15, right: 15, bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 14),
-        decoration: BoxDecoration(
-          border: Border.all(color: HexColor("#E1E6EF"), width: 1.5),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.event_outlined, size: 18, color: HexColor("#607080")),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(fontSize: 13, color: HexColor("#607080")),
-              ),
-            ),
-            Text(
-              _fmtDate(value) ?? 'not_set'.tr,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: value == null ? HexColor("#607080") : Colors.black,
-              ),
-            ),
-            if (value != null)
-              GestureDetector(
-                onTap: () => setState(() => onPicked(null)),
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 8),
-                  child: Icon(
-                    Icons.close,
-                    size: 16,
-                    color: HexColor("#607080"),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
+
 
   Future<void> _onSaveAndContinue() async {
     // Validation runs before the guard: a rejected tap must leave the button
@@ -298,6 +273,17 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
       showCustomToast(context, 'please_add_fuel_type'.tr);
       return;
     }
+    if (_expiryDatesMissing()) {
+      setState(() => _showExpiryErrors = true);
+      showCustomToast(context, 'please_add_document_expiry'.tr);
+      return;
+    }
+    // Only reachable on an edited vehicle whose stored date has lapsed — the
+    // picker itself starts at today.
+    if (_anyExpiryPast()) {
+      showCustomToast(context, 'document_expired_renew'.tr);
+      return;
+    }
 
     // Belt and braces: onTap is already nulled while this is true, but a tap
     // queued in the same frame as the first would still get through.
@@ -315,9 +301,9 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
         vehicleType: vehicleType.toString(),
         vehicleTypeId: vehicleTypeId ?? '',
         oilType: oilType.toString(),
-        rcExpiryDate: _fmtDate(_rcExpiry),
-        insuranceExpiryDate: _fmtDate(_insuranceExpiry),
-        pucExpiryDate: _fmtDate(_pucExpiry),
+        rcExpiryDate: formatExpiryDate(_rcExpiry),
+        insuranceExpiryDate: formatExpiryDate(_insuranceExpiry),
+        pucExpiryDate: _pucExempt ? null : formatExpiryDate(_pucExpiry),
         isOnboarding: widget.isOnboarding,
         editVehicleId: widget.existingVehicle?.id,
       );
@@ -797,7 +783,7 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                                     (item) => DropdownMenuItem(
                                       value: item['id'],
                                       child: Text(
-                                        item['name']!,
+                                        _typeLabel(item),
                                         style: TextStyle(
                                           fontSize: 13,
                                           color: HexColor("#607080"),
@@ -997,7 +983,7 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                           Container(
                             margin: EdgeInsets.only(left: 15, bottom: 4),
                             child: Text(
-                              'document_expiry_optional'.tr,
+                              'document_expiry_dates'.tr,
                               style: TextStyle(
                                 color: Colors.black,
                                 fontSize: 13,
@@ -1019,21 +1005,37 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                               ),
                             ),
                           ),
-                          _expiryTile(
-                            'rc_expiry'.tr,
-                            _rcExpiry,
-                            (d) => _rcExpiry = d,
+                          ExpiryDateTile(
+                            label: 'rc_expiry'.tr,
+                            value: _rcExpiry,
+                            showError: _showExpiryErrors,
+                            onPicked: (d) => setState(() => _rcExpiry = d),
                           ),
-                          _expiryTile(
-                            'insurance_expiry'.tr,
-                            _insuranceExpiry,
-                            (d) => _insuranceExpiry = d,
+                          ExpiryDateTile(
+                            label: 'insurance_expiry'.tr,
+                            value: _insuranceExpiry,
+                            showError: _showExpiryErrors,
+                            onPicked: (d) => setState(() => _insuranceExpiry = d),
                           ),
-                          _expiryTile(
-                            'puc_expiry'.tr,
-                            _pucExpiry,
-                            (d) => _pucExpiry = d,
-                          ),
+                          if (_pucExempt)
+                            Container(
+                              margin: const EdgeInsets.only(
+                                  left: 15, right: 15, bottom: 10),
+                              child: Text(
+                                'puc_not_needed_ev'.tr,
+                                style: TextStyle(
+                                  color: HexColor("#607080"),
+                                  fontSize: 11,
+                                ),
+                              ),
+                            )
+                          else
+                            ExpiryDateTile(
+                              label: 'puc_expiry'.tr,
+                              value: _pucExpiry,
+                              showError: _showExpiryErrors,
+                              onPicked: (d) => setState(() => _pucExpiry = d),
+                            ),
 
                           SizedBox(height: 10),
                         ],

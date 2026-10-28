@@ -4,6 +4,7 @@ import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/CommonWidgets/button_widget.dart';
 import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
 import 'package:movezy_driver_app/CommonWidgets/edit_text_controller.dart';
+import 'package:movezy_driver_app/CommonWidgets/expiry_date_tile.dart';
 import 'package:movezy_driver_app/Screens/AadharCaptureScreen/capture_screen.dart';
 import 'package:movezy_driver_app/Screens/on_boarding_screens/OnbordingApiService/on_boarding_api_service.dart';
 import 'package:flutter/material.dart';
@@ -26,6 +27,10 @@ class _DriverDetailsScreenState extends State<DriverDetailsScreen> {
   var driverNameController = TextEditingController();
   var phoneNumberController = TextEditingController();
   String? driverLicence;
+  // Mandatory (client rule): the licence's expiry drives the 30/15/7-day
+  // reminders and pauses bookings once it lapses.
+  DateTime? _dlExpiry;
+  bool _showExpiryError = false;
 
   bool willDriveVehicle = true;
   String _ownerName = '';
@@ -108,6 +113,11 @@ class _DriverDetailsScreenState extends State<DriverDetailsScreen> {
                     showCustomToast(context, 'please_add_licence'.tr);
                     return;
                   }
+                  if (_dlExpiry == null) {
+                    setState(() => _showExpiryError = true);
+                    showCustomToast(context, 'please_add_dl_expiry'.tr);
+                    return;
+                  }
 
                   // Save step so app can resume from driver_details if needed.
                   Prefs.setString('onboarding_step', 'driver_details');
@@ -117,6 +127,7 @@ class _DriverDetailsScreenState extends State<DriverDetailsScreen> {
                     "driverName": driverNameController.text.trim(),
                     "driverPhone": phoneNumberController.text.trim(),
                     "driverLicence": driverLicence?.toString() ?? '',
+                    "expiryDate": formatExpiryDate(_dlExpiry) ?? '',
                   };
 
                   OnBoardingApiService().addLicenceApi(context, params);
@@ -282,6 +293,23 @@ class _DriverDetailsScreenState extends State<DriverDetailsScreen> {
                               child: Image.file(File(driverLicence.toString()), fit: BoxFit.cover,)),
                         ) : Image.asset('assets/upload_licence_image.png'),
                       ),
+                    ),
+
+                    SizedBox(height: 18,),
+
+                    Padding(
+                      padding: const EdgeInsets.only(left: 18, bottom: 6),
+                      child: Text('dl_expiry'.tr, style: TextStyle(color: Colors.black, fontSize: 13, fontWeight: FontWeight.w600)),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 18, right: 18, bottom: 8),
+                      child: Text('dl_expiry_hint'.tr, style: TextStyle(color: Colors.grey, fontSize: 11)),
+                    ),
+                    ExpiryDateTile(
+                      label: 'expiry_date'.tr,
+                      value: _dlExpiry,
+                      showError: _showExpiryError,
+                      onPicked: (d) => setState(() => _dlExpiry = d),
                     ),
                   ],
                 ),
