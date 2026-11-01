@@ -4,6 +4,7 @@ import 'package:movezy_driver_app/Services/background_presence_service.dart';
 import 'package:movezy_driver_app/Services/app_lifecycle_service.dart';
 import 'package:movezy_driver_app/Routes/app_routes.dart';
 import 'package:movezy_driver_app/Services/booking_alert_service.dart';
+import 'package:movezy_driver_app/Services/push_notification_service.dart';
 import 'package:movezy_driver_app/Utils/Localization/app_translations.dart';
 import 'package:movezy_driver_app/Utils/OfflineStorage/offline_service.dart';
 import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
@@ -32,6 +33,9 @@ void main() async {
   await BookingRingService.instance.init();
   BookingRingService.instance.onNotificationTap =
       BookingAlertService.instance.handleNotificationTap;
+  // Server pushes (offers while closed, approvals, reminders); taps go
+  // through the same handler as the ring's notifications.
+  await PushNotificationService.instance.init();
   await BackgroundPresenceService.init();
   AppLifecycleService.instance.register();
 

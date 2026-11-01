@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:movezy_driver_app/Services/booking_alert_service.dart';
+import 'package:movezy_driver_app/Services/push_notification_service.dart';
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
 import 'package:movezy_driver_app/Utils/LocationService/location_tracking_service.dart';
 import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
@@ -50,6 +51,10 @@ Future<void> performDriverLogout() async {
   } catch (e) {
     debugPrint('logout: server logout failed (continuing): $e');
   }
+
+  // Retire this phone's push token so the next driver on the device doesn't
+  // receive this driver's offers and account messages.
+  await PushNotificationService.instance.unregisterDevice();
 
   // 3. Clear local session — including the token, which was previously left behind.
   Prefs.setBool('check_log_in', false);

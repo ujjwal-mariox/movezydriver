@@ -34,7 +34,7 @@
     <uses-permission android:name="android.permission.VIBRATE"/>
 
     <application
-        android:label="movezy_driver_app"
+        android:label="Movezy Partner"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:networkSecurityConfig="@xml/network_security_config">
@@ -71,6 +71,18 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Firebase pushes shown by Android while the app is closed. The
+             channel id matches the one the backend sends (booking offers use
+             the ring channel instead) and the one the app creates at startup. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="movezy_channel" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_color" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

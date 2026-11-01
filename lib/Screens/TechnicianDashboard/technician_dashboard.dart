@@ -8,6 +8,7 @@ import 'package:hexcolor/hexcolor.dart';
 import 'package:intl/intl.dart';
 import 'package:movezy_driver_app/Utils/OfflineStorage/offline_service.dart';
 import 'package:movezy_driver_app/Services/booking_alert_service.dart';
+import 'package:movezy_driver_app/Services/push_notification_service.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/Screens/MyProfileScreen/my_profile_screen.dart';
 import 'package:movezy_driver_app/Screens/TakeBookingsScreen/take_bookings_screen.dart';
@@ -62,6 +63,10 @@ class _TechnicianDashboardState extends State<TechnicianDashboard> {
     super.initState();
     _loadDashboard();
     _connectSocket();
+    // Re-send the push token on every dashboard open: the background service
+    // keeps the process alive across "close", so startup alone can miss a
+    // retry after a failed upload.
+    PushNotificationService.instance.registerDevice();
     // Pull the admin-configured support number once per session so any call
     // control in the app has a real value to guard on. It stays empty — and
     // every call control stays hidden — if none is configured.

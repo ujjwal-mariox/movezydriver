@@ -230,6 +230,9 @@ class ApiUrls {
   // real (list + unreadCount + mark-read); the app simply had no screen for it.
   static String driverNotificationsUrl =
       "$baseUrlApi/driver/app/notifications";
+  // Registers this phone for push notifications (Firebase token).
+  static String driverFcmTokenUrl =
+      "$baseUrlApi/driver/app/notifications/fcm-token";
 
   // Masked calling — the server bridges the call; the app never sees the number.
   static String driverCallCustomerUrl(String bookingId) => "$baseUrlApi/driver/app/bookings/$bookingId/call";

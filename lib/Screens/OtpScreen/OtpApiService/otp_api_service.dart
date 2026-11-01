@@ -11,6 +11,7 @@ import 'package:movezy_driver_app/Screens/TechnicianDashboard/dashboard_api_serv
 import 'package:movezy_driver_app/Screens/on_boarding_screens/basic_details_screen.dart';
 import 'package:movezy_driver_app/Utils/CustomToast/custome_toast.dart';
 import 'package:movezy_driver_app/Utils/PrefsManager/prefs_manager.dart';
+import 'package:movezy_driver_app/Services/push_notification_service.dart';
 import 'package:http/http.dart' as http;
 
 class OtpApiService {
@@ -39,6 +40,9 @@ class OtpApiService {
           // Clear any stale onboarding step from previous sessions
           await Prefs.setString('onboarding_step', '');
           Prefs.loadData();
+          // Register for pushes now, so drivers still in onboarding also get
+          // "verification approved" (fire-and-forget; never blocks login).
+          PushNotificationService.instance.registerDevice();
 
           // Sync language preference: save local choice to backend,
           // or load backend preference if no local selection

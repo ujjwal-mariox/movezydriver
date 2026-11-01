@@ -18,6 +18,12 @@ class BookingRingService {
 
   static const String _bookingChannelId = 'booking_requests_v2';
   static const String _chatChannelId = 'chat_messages_v1';
+  // Must match the channelId the backend puts on pushes (other than booking
+  // offers, which use the ring channel above).
+  static const String _generalChannelId = 'movezy_channel';
+  static const String _generalChannelName = 'Account and trip updates';
+  static const String _generalChannelDescription =
+      'Verification, vehicle, trip and account updates from Movezy';
 
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
@@ -34,7 +40,9 @@ class BookingRingService {
     if (_initialised) return;
 
     try {
-      const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+      // Single-colour status-bar icon; the launcher icon shows as a white
+      // square there.
+      const android = AndroidInitializationSettings('@drawable/ic_notification');
       const ios = DarwinInitializationSettings(
         requestAlertPermission: false,
         requestBadgePermission: false,
@@ -71,6 +79,14 @@ class BookingRingService {
             _chatChannelId,
             'Customer messages',
             description: 'Messages from the customer on your current trip',
+            importance: Importance.high,
+          ),
+        );
+        await androidImpl.createNotificationChannel(
+          const AndroidNotificationChannel(
+            _generalChannelId,
+            _generalChannelName,
+            description: _generalChannelDescription,
             importance: Importance.high,
           ),
         );
@@ -211,6 +227,41 @@ class BookingRingService {
       );
     } catch (e) {
       debugPrint('ring: chat notification failed: $e');
+    }
+  }
+
+  /// A server push that arrived while the app is open (Android only shows
+  /// pushes itself when the app is in the background). [payload] uses the
+  /// same `booking:<id>` / `chat:<id>` form, or is empty to just open the app.
+  Future<void> showGeneralNotification({
+    required String title,
+    required String body,
+    String payload = '',
+  }) async {
+    try {
+      await _notifications.show(
+        id: _idFor('push:$title:$body:${DateTime.now().millisecondsSinceEpoch}'),
+        title: title,
+        body: body,
+        notificationDetails: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _generalChannelId,
+            _generalChannelName,
+            channelDescription: _generalChannelDescription,
+            importance: Importance.high,
+            priority: Priority.high,
+            color: Color(0xFFFF6200),
+            autoCancel: true,
+          ),
+          iOS: DarwinNotificationDetails(
+            presentSound: true,
+            presentAlert: true,
+          ),
+        ),
+        payload: payload,
+      );
+    } catch (e) {
+      debugPrint('ring: push notification failed: $e');
     }
   }
 }

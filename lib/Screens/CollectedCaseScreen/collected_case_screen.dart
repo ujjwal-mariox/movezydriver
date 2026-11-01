@@ -1078,7 +1078,7 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
       children: [
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.movezy.driver',
+          userAgentPackageName: 'co.movezy.partner',
         ),
         if (origin != null)
           PolylineLayer(

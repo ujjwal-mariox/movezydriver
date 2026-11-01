@@ -1,4 +1,4 @@
-package com.example.movezy_driver_app
+package co.movezy.partner
 
 import io.flutter.embedding.android.FlutterActivity
 

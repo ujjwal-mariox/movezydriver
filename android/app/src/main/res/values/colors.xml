@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Movezy orange: tints the notification icon. -->
+    <color name="notification_color">#FF6200</color>
 </resources>

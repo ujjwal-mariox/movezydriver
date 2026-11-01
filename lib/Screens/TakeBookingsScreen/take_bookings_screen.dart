@@ -226,7 +226,7 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
       children: [
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.movezy.driver',
+          userAgentPackageName: 'co.movezy.partner',
         ),
         PolylineLayer(
           polylines: [
