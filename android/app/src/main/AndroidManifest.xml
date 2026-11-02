@@ -71,6 +71,11 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Google Maps (Maps SDK for Android); the key comes from
+             android/local.properties via build.gradle.kts. -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${mapsApiKey}" />
         <!-- Firebase pushes shown by Android while the app is closed. The
              channel id matches the one the backend sends (booking offers use
              the ring channel instead) and the one the app creates at startup. -->

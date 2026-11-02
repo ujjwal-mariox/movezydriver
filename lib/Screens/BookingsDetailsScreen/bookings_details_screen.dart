@@ -20,7 +20,7 @@ import 'package:movezy_driver_app/Screens/TechnicianDashboard/Model/driver_dashb
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:movezy_driver_app/CommonWidgets/movezy_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:movezy_driver_app/Services/routing_service.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -39,7 +39,7 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
   final DashboardApiService _apiService = DashboardApiService();
   bool _isArriving = false;
   IO.Socket? _socket;
-  final MapController _mapController = MapController();
+  final MovezyMapController _mapController = MovezyMapController();
   Timer? _mapFitTimer;
   Size _mapSize = Size.zero;
   double _sheetExtent = .42;
@@ -65,7 +65,6 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
   @override
   void dispose() {
     _mapFitTimer?.cancel();
-    _mapController.dispose();
     _socket?.dispose();
     _socket = null;
     // Leaving without moving on to the OTP screen means no trip is underway.
@@ -140,20 +139,17 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
         12.0,
         (exposed - 44).clamp(12.0, double.infinity),
       );
-      try {
-        _mapController.fitCamera(
-          CameraFit.bounds(
-            bounds: _mapBounds,
-            padding: EdgeInsets.fromLTRB(28, topPadding, 28, sheetHeight + 12),
-          ),
-        );
-      } catch (_) {
-        /* Map may not be attached yet; onMapReady retries. */
-      }
+      // A no-op until the map exists; onMapReady retries.
+      _mapController.fitPoints(
+        _mapBounds,
+        padding: 0,
+        insets: EdgeInsets.fromLTRB(28, topPadding, 28, sheetHeight + 12),
+      );
     });
   }
 
-  LatLngBounds get _mapBounds {
+  /// Corners framing pickup and drop with ~1 km of margin.
+  List<LatLng> get _mapBounds {
     final minLat = booking.pickup.lat < booking.drop.lat
         ? booking.pickup.lat
         : booking.drop.lat;
@@ -166,10 +162,10 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
     final maxLng = booking.pickup.lng > booking.drop.lng
         ? booking.pickup.lng
         : booking.drop.lng;
-    return LatLngBounds(
+    return [
       LatLng(minLat - 0.01, minLng - 0.01),
       LatLng(maxLat + 0.01, maxLng + 0.01),
-    );
+    ];
   }
 
   /// Raise a real support ticket for this booking (the button was a
@@ -467,55 +463,46 @@ class _BookingDetailPageState extends State<BookingDetailPage> {
           children: [
             Positioned.fill(
               child: _hasValidCoords
-                  ? FlutterMap(
-                      mapController: _mapController,
-                      options: MapOptions(
-                        initialCameraFit: CameraFit.bounds(
-                          bounds: _mapBounds,
-                          padding: const EdgeInsets.all(60),
+                  ? MovezyMap(
+                      controller: _mapController,
+                      initialCenter: pickupLatLng,
+                      fitPoints: _mapBounds,
+                      fitPadding: 60,
+                      onMapReady: _scheduleMapFit,
+                      lines: [
+                        MapLine(
+                          id: 'route',
+                          points: _roadRoute.isNotEmpty
+                              ? _roadRoute
+                              : [pickupLatLng, dropLatLng],
+                          color: AppColors.appColor,
+                          width: 4,
                         ),
-                        onMapReady: _scheduleMapFit,
-                      ),
-                      children: [
-                        TileLayer(
-                          urlTemplate:
-                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'co.movezy.partner',
+                      ],
+                      markers: [
+                        MapMarker(
+                          id: 'pickup',
+                          key: 'details-pickup',
+                          point: pickupLatLng,
+                          width: 40,
+                          height: 40,
+                          child: const Icon(
+                            Icons.location_on,
+                            color: Colors.green,
+                            size: 32,
+                          ),
                         ),
-                        PolylineLayer(
-                          polylines: [
-                            Polyline(
-                              points: _roadRoute.isNotEmpty
-                                  ? _roadRoute
-                                  : [pickupLatLng, dropLatLng],
-                              color: AppColors.appColor,
-                              strokeWidth: 4,
-                            ),
-                          ],
-                        ),
-                        MarkerLayer(
-                          markers: [
-                            Marker(
-                              point: pickupLatLng,
-                              width: 40,
-                              height: 40,
-                              child: const Icon(
-                                Icons.location_on,
-                                color: Colors.green,
-                                size: 32,
-                              ),
-                            ),
-                            Marker(
-                              point: dropLatLng,
-                              width: 40,
-                              height: 40,
-                              child: const Icon(
-                                Icons.location_on,
-                                color: Colors.red,
-                                size: 32,
-                              ),
-                            ),
-                          ],
+                        MapMarker(
+                          id: 'drop',
+                          key: 'details-drop',
+                          point: dropLatLng,
+                          width: 40,
+                          height: 40,
+                          child: const Icon(
+                            Icons.location_on,
+                            color: Colors.red,
+                            size: 32,
+                          ),
                         ),
                       ],
                     )

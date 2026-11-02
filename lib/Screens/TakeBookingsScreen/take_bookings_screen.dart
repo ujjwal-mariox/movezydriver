@@ -7,7 +7,7 @@ import 'package:movezy_driver_app/Screens/TechnicianDashboard/Model/driver_dashb
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:movezy_driver_app/CommonWidgets/movezy_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:movezy_driver_app/Services/routing_service.dart';
 import 'package:fluttertoast/fluttertoast.dart';
@@ -95,15 +95,16 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
       booking.pickup.lat != 0 && booking.pickup.lng != 0 &&
       booking.drop.lat != 0 && booking.drop.lng != 0;
 
-  LatLngBounds get _mapBounds {
+  /// Corners framing pickup and drop with ~1 km of margin.
+  List<LatLng> get _mapBounds {
     final minLat = booking.pickup.lat < booking.drop.lat ? booking.pickup.lat : booking.drop.lat;
     final maxLat = booking.pickup.lat > booking.drop.lat ? booking.pickup.lat : booking.drop.lat;
     final minLng = booking.pickup.lng < booking.drop.lng ? booking.pickup.lng : booking.drop.lng;
     final maxLng = booking.pickup.lng > booking.drop.lng ? booking.pickup.lng : booking.drop.lng;
-    return LatLngBounds(
+    return [
       LatLng(minLat - 0.01, minLng - 0.01),
       LatLng(maxLat + 0.01, maxLng + 0.01),
-    );
+    ];
   }
 
   @override
@@ -214,47 +215,40 @@ class _TakeBookingsScreenState extends State<TakeBookingsScreen> {
             style: const TextStyle(color: _grayShade2)),
       );
     }
-    return FlutterMap(
-      options: MapOptions(
-        initialCameraFit: CameraFit.bounds(
-          bounds: _mapBounds,
-          // Generous bottom inset: the sheet covers roughly the lower half, so
-          // an evenly padded fit would centre the route underneath it.
-          padding: const EdgeInsets.fromLTRB(60, 150, 60, 380),
+    return MovezyMap(
+      initialCenter: pickupLatLng,
+      fitPoints: _mapBounds,
+      fitPadding: 0,
+      // Generous bottom inset: the sheet covers roughly the lower half, so
+      // an evenly padded fit would centre the route underneath it.
+      fitInsets: const EdgeInsets.fromLTRB(60, 150, 60, 380),
+      lines: [
+        MapLine(
+          id: 'route',
+          points: _roadRoute.isNotEmpty
+              ? _roadRoute
+              : [pickupLatLng, dropLatLng],
+          color: AppColors.appColor,
+          width: 3,
         ),
-      ),
-      children: [
-        TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'co.movezy.partner',
+      ],
+      markers: [
+        MapMarker(
+          id: 'pickup',
+          key: 'offer-pickup',
+          point: pickupLatLng,
+          width: 34,
+          height: 34,
+          child: _pickupMarker(),
         ),
-        PolylineLayer(
-          polylines: [
-            Polyline(
-              points: _roadRoute.isNotEmpty
-                  ? _roadRoute
-                  : [pickupLatLng, dropLatLng],
-              color: AppColors.appColor,
-              strokeWidth: 3,
-            ),
-          ],
-        ),
-        MarkerLayer(
-          markers: [
-            Marker(
-              point: pickupLatLng,
-              width: 34,
-              height: 34,
-              child: _pickupMarker(),
-            ),
-            Marker(
-              point: dropLatLng,
-              width: 44,
-              height: 56,
-              child: const Icon(Icons.location_on,
-                  color: _errorRed, size: 40),
-            ),
-          ],
+        MapMarker(
+          id: 'drop',
+          key: 'offer-drop',
+          point: dropLatLng,
+          width: 44,
+          height: 56,
+          child: const Icon(Icons.location_on,
+              color: _errorRed, size: 40),
         ),
       ],
     );

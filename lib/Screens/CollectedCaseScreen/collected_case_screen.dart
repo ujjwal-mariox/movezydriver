@@ -15,7 +15,7 @@ import 'package:movezy_driver_app/Utils/LocationService/location_tracking_servic
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/dashboard_api_service.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
+import 'package:movezy_driver_app/CommonWidgets/movezy_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:movezy_driver_app/Services/routing_service.dart';
@@ -1064,83 +1064,77 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
         ? LatLng(_position!.latitude, _position!.longitude)
         : _pickupLatLng;
 
-    return FlutterMap(
-      options: MapOptions(
-        initialCameraFit: origin != null
-            ? CameraFit.bounds(
-                bounds: LatLngBounds.fromPoints([origin, drop]),
-                padding: const EdgeInsets.fromLTRB(60, 90, 60, 60),
-              )
-            : null,
-        initialCenter: drop,
-        initialZoom: 14,
-      ),
-      children: [
-        TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'co.movezy.partner',
-        ),
+    return MovezyMap(
+      initialCenter: drop,
+      initialZoom: 14,
+      fitPoints: origin != null ? [origin, drop] : null,
+      fitPadding: 0,
+      fitInsets:
+          origin != null ? const EdgeInsets.fromLTRB(60, 90, 60, 60) : null,
+      lines: [
         if (origin != null)
-          PolylineLayer(
-            polylines: [
-              Polyline(
-                points:
-                    _roadRoute.isNotEmpty ? _roadRoute : [origin, drop],
-                color: AppColors.appColor,
-                strokeWidth: 3,
-              ),
-            ],
+          MapLine(
+            id: 'route',
+            points: _roadRoute.isNotEmpty ? _roadRoute : [origin, drop],
+            color: AppColors.appColor,
+            width: 3,
           ),
-        MarkerLayer(
-          markers: [
-            if (origin != null)
-              Marker(
-                point: origin,
-                width: 30,
-                height: 30,
-                child: _blueDot(),
-              ),
-            Marker(
-              point: drop,
-              width: 44,
-              height: 56,
-              child: const Icon(Icons.location_on,
-                  color: Color(0xFFE02D3C), size: 40),
-            ),
-            // Upcoming stops beyond the current one, numbered; the final drop
-            // gets a small grey pin while a stop is still the target.
-            for (var i = _nextStopIndex + 1;
-                _isOnStopLeg && i < _stops.length;
-                i++)
-              if (_stopLatLng(_stops[i]) != null)
-                Marker(
-                  point: _stopLatLng(_stops[i])!,
-                  width: 26,
-                  height: 26,
-                  child: Container(
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: AppColors.appColor,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
-                    ),
-                    child: Text('${i + 1}',
-                        style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white)),
-                  ),
-                ),
-            if (_isOnStopLeg && _dropLatLng != null)
-              Marker(
-                point: _dropLatLng!,
-                width: 30,
-                height: 38,
-                child: const Icon(Icons.location_on,
-                    color: Color(0xFF9AA4B2), size: 28),
-              ),
-          ],
+      ],
+      markers: [
+        if (origin != null)
+          MapMarker(
+            id: 'me',
+            key: 'collected-me',
+            point: origin,
+            width: 30,
+            height: 30,
+            child: _blueDot(),
+          ),
+        MapMarker(
+          id: 'target',
+          key: 'collected-target',
+          point: drop,
+          width: 44,
+          height: 56,
+          child: const Icon(Icons.location_on,
+              color: Color(0xFFE02D3C), size: 40),
         ),
+        // Upcoming stops beyond the current one, numbered; the final drop
+        // gets a small grey pin while a stop is still the target.
+        for (var i = _nextStopIndex + 1;
+            _isOnStopLeg && i < _stops.length;
+            i++)
+          if (_stopLatLng(_stops[i]) != null)
+            MapMarker(
+              id: 'stop-$i',
+              key: 'collected-stop-${i + 1}',
+              point: _stopLatLng(_stops[i])!,
+              width: 26,
+              height: 26,
+              child: Container(
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.appColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+                child: Text('${i + 1}',
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white)),
+              ),
+            ),
+        if (_isOnStopLeg && _dropLatLng != null)
+          MapMarker(
+            id: 'final-drop',
+            key: 'collected-final-drop',
+            point: _dropLatLng!,
+            width: 30,
+            height: 38,
+            child: const Icon(Icons.location_on,
+                color: Color(0xFF9AA4B2), size: 28),
+          ),
       ],
     );
   }
