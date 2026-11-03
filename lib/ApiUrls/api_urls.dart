@@ -233,6 +233,12 @@ class ApiUrls {
   // Registers this phone for push notifications (Firebase token).
   static String driverFcmTokenUrl =
       "$baseUrlApi/driver/app/notifications/fcm-token";
+  // Delete my account: GET = what's in the way, POST = schedule it.
+  static String driverAccountDeletionUrl =
+      "$baseUrlApi/driver/app/account/deletion";
+  // People a driver's SOS texts (GET list / POST add / DELETE /{id}).
+  static String driverEmergencyContactsUrl =
+      "$baseUrlApi/driver/app/sos/contacts";
 
   // Masked calling — the server bridges the call; the app never sees the number.
   static String driverCallCustomerUrl(String bookingId) => "$baseUrlApi/driver/app/bookings/$bookingId/call";

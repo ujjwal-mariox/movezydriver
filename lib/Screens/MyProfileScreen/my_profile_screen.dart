@@ -24,6 +24,8 @@ import 'package:movezy_driver_app/Screens/TripHistoryPage/trip_history_page.dart
 import 'package:movezy_driver_app/Screens/driver_instruction_screen/driver_instructions_screen.dart';
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
 import 'package:movezy_driver_app/Utils/Auth/driver_logout.dart';
+import 'package:movezy_driver_app/Screens/DeleteAccountScreen/delete_account_screen.dart';
+import 'package:movezy_driver_app/Screens/EmergencyContactsScreen/emergency_contacts_screen.dart';
 
 class MyProfileScreen extends StatefulWidget {
   const MyProfileScreen({super.key});
@@ -394,6 +396,16 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                   ? _doneBadge('Read')
                   : null),
           _divider(),
+          // The people a driver's SOS texts; there was no way to add any.
+          _buildIconTile('emergency_contacts'.tr, Icons.contact_emergency_outlined, () {
+            pushTo(context, const EmergencyContactsScreen());
+          }),
+          _divider(),
+          // Both app stores require in-app account deletion.
+          _buildIconTile('delete_account'.tr, Icons.person_remove_outlined, () {
+            pushTo(context, const DeleteAccountScreen());
+          }, color: Colors.red),
+          _divider(),
           ListTile(
             onTap: () async {
               // Shared routine: stops GPS/socket, tells the server we're offline
@@ -516,6 +528,21 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
       title: Text(title, style: const TextStyle(fontSize: 13)),
       trailing: trailing ??
           Icon(Icons.arrow_forward_ios, color: HexColor('#6B7280'), size: 16),
+    );
+  }
+
+  /// A row like [_buildListTile] for items with no design PNG.
+  Widget _buildIconTile(String title, IconData icon, VoidCallback onTap,
+      {Color? color}) {
+    return ListTile(
+      onTap: onTap,
+      leading: SizedBox(
+        height: 27,
+        width: 27,
+        child: Icon(icon, color: color ?? AppColors.appColor, size: 25),
+      ),
+      title: Text(title, style: TextStyle(fontSize: 13, color: color)),
+      trailing: Icon(Icons.arrow_forward_ios, color: HexColor('#6B7280'), size: 16),
     );
   }
 

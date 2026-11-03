@@ -43,6 +43,10 @@ class OtpApiService {
           // Register for pushes now, so drivers still in onboarding also get
           // "verification approved" (fire-and-forget; never blocks login).
           PushNotificationService.instance.registerDevice();
+          // Signing in within the 30 days after "Delete account" keeps it.
+          if (json.decode(response.body)['data']?['deletionCancelled'] == true) {
+            showCustomToast(context, 'deletion_cancelled'.tr);
+          }
 
           // Sync language preference: save local choice to backend,
           // or load backend preference if no local selection
