@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:movezy_driver_app/ApiUrls/api_urls.dart';
@@ -88,12 +89,33 @@ class SupportChatService {
     return [];
   }
 
+  /// The guided support tree, in the app's language (English when the
+  /// server has no translation). Empty when it can't be loaded.
+  Future<List<Map<String, dynamic>>> getFlow() async {
+    try {
+      final lang = Get.locale?.languageCode ?? 'en';
+      final res = await http
+          .get(Uri.parse('${ApiUrls.driverSupportFlowUrl}?lang=$lang'),
+              headers: _headers)
+          .timeout(const Duration(seconds: 20));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body)['data'];
+        final List rows = (data is Map ? data['flow'] : null) ?? [];
+        return rows.map((r) => Map<String, dynamic>.from(r)).toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
   /// Create a new ticket. Returns the created ticket's human id, or null.
+  /// With [supportNodeId] (an issue picked in the guided chat) the server sets
+  /// the category, subject and priority, so those may be left out.
   Future<String?> createTicket({
-    required String category,
-    required String subject,
+    String? category,
+    String? subject,
     required String message,
     String? bookingId,
+    String? supportNodeId,
   }) async {
     try {
       final res = await http
@@ -101,11 +123,12 @@ class SupportChatService {
             Uri.parse(ApiUrls.driverRaiseTicketUrl),
             headers: _headers,
             body: jsonEncode({
-              'category': category,
-              'subject': subject,
+              if (category != null) 'category': category,
+              if (subject != null) 'subject': subject,
               'message': message,
               if (bookingId != null && bookingId.isNotEmpty)
                 'bookingId': bookingId,
+              if (supportNodeId != null) 'supportNodeId': supportNodeId,
             }),
           )
           .timeout(const Duration(seconds: 20));
@@ -118,23 +141,32 @@ class SupportChatService {
     return null;
   }
 
-  /// Fetch a ticket's message thread.
-  Future<List<SupportMessage>> getMessages(String ticketId) async {
+  /// Fetch a ticket's message thread, plus the chips to offer for the
+  /// driver's reply after a support message (from the issue picked).
+  Future<(List<SupportMessage>, List<String>)> getMessages(
+      String ticketId) async {
     try {
+      final lang = Get.locale?.languageCode ?? 'en';
       final res = await http
-          .get(Uri.parse(ApiUrls.driverSupportTicketDetailsUrl(ticketId)),
+          .get(
+              Uri.parse(
+                  '${ApiUrls.driverSupportTicketDetailsUrl(ticketId)}?lang=$lang'),
               headers: _headers)
           .timeout(const Duration(seconds: 20));
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         final data = body['data'] ?? body;
         final msgs = (data is Map ? data['messages'] : null) ?? [];
-        return (msgs as List)
-            .map((e) => SupportMessage.fromJson(e as Map<String, dynamic>))
-            .toList();
+        final followUps = (data is Map ? data['followUps'] : null) ?? [];
+        return (
+          (msgs as List)
+              .map((e) => SupportMessage.fromJson(e as Map<String, dynamic>))
+              .toList(),
+          (followUps as List).map((e) => e.toString()).toList(),
+        );
       }
     } catch (_) {}
-    return [];
+    return (<SupportMessage>[], <String>[]);
   }
 
   /// Send a reply on an existing ticket.

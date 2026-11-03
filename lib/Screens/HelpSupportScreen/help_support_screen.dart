@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:movezy_driver_app/CommonWidgets/app_bar.dart';
 import 'package:movezy_driver_app/Screens/SupportChat/support_chat_service.dart';
+import 'package:movezy_driver_app/Screens/SupportChat/support_ticket_thread_screen.dart';
 import 'package:movezy_driver_app/Screens/SupportChat/support_tickets_screen.dart';
 import 'package:movezy_driver_app/Utils/AppColors/app_colors.dart';
 
@@ -51,14 +52,22 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     'not answering': 'customer_bot_response',
   };
 
-  // Quick action buttons
-  final List<Map<String, dynamic>> _quickActions = [
-    {'key': 'emergency', 'icon': Icons.emergency_outlined},
-    {'key': 'payment_issue', 'icon': Icons.account_balance_wallet_outlined},
-    {'key': 'app_problem', 'icon': Icons.phonelink_erase_outlined},
-    {'key': 'document_help', 'icon': Icons.description_outlined},
-    {'key': 'account_issue', 'icon': Icons.person_outline},
-  ];
+  // Guided support: the tree the server keeps (topic → issue → answer), one
+  // set of chips per step. Typed messages still go to the keyword bot below.
+  List<Map<String, dynamic>> _flow = [];
+  bool _loadingFlow = true;
+  // Nodes picked so far, root first. Its last entry is where the chat is.
+  final List<Map<String, dynamic>> _trail = [];
+
+  static const Map<String, IconData> _topicIcons = {
+    'emergency': Icons.emergency_outlined,
+    'earnings': Icons.account_balance_wallet_outlined,
+    'documents': Icons.description_outlined,
+    'trips': Icons.local_shipping_outlined,
+    'app': Icons.phonelink_erase_outlined,
+    'account': Icons.person_outline,
+    'other': Icons.help_outline,
+  };
 
   // Bot field-collection state. After a category is identified the bot asks
   // a short series of questions (Order ID → date/time → payment type) and
@@ -81,6 +90,102 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     Future.delayed(const Duration(milliseconds: 500), () {
       _addBotMessage('bot_greeting');
     });
+    _loadFlow();
+  }
+
+  Future<void> _loadFlow() async {
+    final flow = await _supportService.getFlow();
+    if (!mounted) return;
+    setState(() {
+      _flow = flow;
+      _loadingFlow = false;
+    });
+  }
+
+  List<Map<String, dynamic>> _childrenOf(Map<String, dynamic>? node) {
+    final List rows = node == null ? _flow : (node['children'] ?? const []);
+    return rows.map((r) => Map<String, dynamic>.from(r)).toList();
+  }
+
+  /// The driver tapped a topic or issue: say it, then the assistant asks the
+  /// next question, answers, or connects to support.
+  void _pickNode(Map<String, dynamic> node) {
+    _trail.add(node);
+    _addUserMessage((node['label'] ?? '').toString());
+    final answer = node['answer']?.toString();
+    final escalate = node['escalateNow'] == true;
+
+    if (escalate && answer == null) {
+      // Emergency: no answer step, straight to the support queue.
+      _handleEmergencyEscalation();
+      return;
+    }
+    if (_childrenOf(node).isNotEmpty) {
+      _addRawBotMessage(node['prompt']?.toString() ?? 'flow_more'.tr);
+    } else if (answer != null) {
+      _addRawBotMessage(answer);
+      if (escalate) {
+        _openAgentChat();
+      } else {
+        _addBotMessage('flow_did_it_help');
+      }
+    }
+  }
+
+  void _answerHelped() {
+    _trail.clear();
+    _addUserMessage('flow_helped'.tr);
+    _addBotMessage('flow_glad');
+  }
+
+  void _stepBack() {
+    setState(() => _trail.removeLast());
+    if (_trail.isEmpty) {
+      _addBotMessage('flow_pick_another');
+    } else {
+      _addRawBotMessage(_trail.last['prompt']?.toString() ?? 'flow_more'.tr);
+    }
+  }
+
+  /// "Still need help": open a ticket for the picked issue (the server files
+  /// it under that issue's category and priority, with the conversation so
+  /// far as its first message) and take the driver into its live thread.
+  Future<void> _openAgentChat() async {
+    if (_raisingTicket) return;
+    setState(() {
+      _raisingTicket = true;
+      _showSupportOptions = true;
+    });
+    _addBotMessage('flow_connecting');
+
+    final transcript = _messages
+        .map((m) => '${m.isUser ? 'Driver' : 'Assistant'}: ${m.text}')
+        .join('\n');
+    final ticketId = await _supportService.createTicket(
+      supportNodeId: _trail.isEmpty ? null : _trail.last['id']?.toString(),
+      category: _trail.isEmpty ? _ticketCategory() : null,
+      subject: _trail.isEmpty ? 'Help & Support chat' : null,
+      message: transcript,
+    );
+
+    if (!mounted) return;
+    setState(() => _raisingTicket = false);
+    if (ticketId == null) {
+      _addRawBotMessage('ticket_submit_failed'.tr);
+      return;
+    }
+    _addRawBotMessage('${'flow_connected'.tr} $ticketId');
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SupportTicketThreadScreen(
+          ticketId: ticketId,
+          subject: _trail.isEmpty
+              ? 'help_support'.tr
+              : (_trail.last['label'] ?? '').toString(),
+        ),
+      ),
+    );
   }
 
   @override
@@ -303,6 +408,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     _addRawBotMessage('Raising an emergency support request…');
 
     final ticketId = await _supportService.createTicket(
+      supportNodeId: 'emergency',
       category: 'Emergency',
       subject: 'Emergency - driver needs urgent help${_issueContext()}',
       message:
@@ -326,43 +432,6 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
         'services now.',
       );
     }
-  }
-
-  void _handleQuickAction(String key) {
-    _addUserMessage(key.tr);
-    
-    setState(() => _isTyping = true);
-    Future.delayed(const Duration(milliseconds: 1000), () {
-      setState(() => _isTyping = false);
-      
-      switch (key) {
-        case 'emergency':
-          _handleEmergencyEscalation();
-          return;
-        case 'payment_issue':
-          _addBotMessage('payment_bot_response');
-          _startDetailsCollection('payment_bot_response');
-          break;
-        case 'app_problem':
-          _addBotMessage('app_issue_bot_response');
-          _startDetailsCollection('app_issue_bot_response');
-          break;
-        case 'document_help':
-          _addBotMessage('document_bot_response');
-          break;
-        case 'account_issue':
-          _addBotMessage('account_bot_response');
-          break;
-      }
-      
-      // Show support options after quick action response
-      Future.delayed(const Duration(milliseconds: 1500), () {
-        if (!_showSupportOptions) {
-          setState(() => _showSupportOptions = true);
-          _addBotMessage('bot_offer_support');
-        }
-      });
-    });
   }
 
   void _showSupportOptionsSheet() {
@@ -553,6 +622,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     setState(() => _raisingTicket = true);
 
     final ticketId = await _supportService.createTicket(
+      supportNodeId: _trail.isEmpty ? null : _trail.last['id']?.toString(),
       category: _ticketCategory(),
       subject: 'Call back requested${_issueContext()}',
       message:
@@ -630,41 +700,9 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
             ),
           ),
 
-          // Quick Actions (show only at the start)
-          if (_messages.length <= 1)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'quick_help'.tr,
-                    style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.grey.shade700,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _quickActions.map((action) {
-                      return ActionChip(
-                        avatar: Icon(action['icon'] as IconData, size: 18, color: AppColors.appColor),
-                        label: Text(
-                          (action['key'] as String).tr,
-                          style: GoogleFonts.poppins(fontSize: 13),
-                        ),
-                        onPressed: () => _handleQuickAction(action['key'] as String),
-                        backgroundColor: AppColors.appColor.withValues(alpha: 0.08),
-                        side: BorderSide(color: AppColors.appColor.withValues(alpha: 0.3)),
-                      );
-                    }).toList(),
-                  ),
-                ],
-              ),
-            ),
+          // Guided chips for the current step; hidden while the typed-message
+          // bot is collecting details.
+          if (!_collectingDetails) _guidedChips(),
 
           // Connect to Support Button (show after bot conversation).
           // The "Call" button that sat to the left of this dialled the
@@ -742,6 +780,71 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _guidedChips() {
+    if (_loadingFlow || _flow.isEmpty) return const SizedBox.shrink();
+    final here = _trail.isEmpty ? null : _trail.last;
+    final options = _childrenOf(here);
+
+    Widget chip(String label, VoidCallback? onTap,
+            {IconData? icon, bool accent = false}) =>
+        ActionChip(
+          avatar: icon == null
+              ? null
+              : Icon(icon, size: 18, color: AppColors.appColor),
+          label: Text(
+            label,
+            style: GoogleFonts.poppins(
+                fontSize: 13, color: accent ? Colors.white : null),
+          ),
+          onPressed: onTap,
+          backgroundColor: accent
+              ? AppColors.appColor
+              : AppColors.appColor.withValues(alpha: 0.08),
+          side: BorderSide(color: AppColors.appColor.withValues(alpha: 0.3)),
+        );
+
+    final chips = <Widget>[];
+    if (here != null && options.isEmpty) {
+      // An answer was given: did it help?
+      chips.add(chip('flow_helped'.tr, _answerHelped));
+      chips.add(chip('flow_still_need_help'.tr,
+          _raisingTicket ? null : _openAgentChat,
+          accent: true));
+      chips.add(chip('flow_back'.tr, _stepBack));
+    } else {
+      for (final node in options) {
+        chips.add(chip(
+          (node['label'] ?? '').toString(),
+          _raisingTicket ? null : () => _pickNode(node),
+          icon: here == null ? _topicIcons[node['id']] : null,
+        ));
+      }
+      if (here != null) chips.add(chip('flow_back'.tr, _stepBack));
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      width: double.infinity,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (here == null) ...[
+            Text(
+              'quick_help'.tr,
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey.shade700,
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          Wrap(spacing: 8, runSpacing: 8, children: chips),
         ],
       ),
     );

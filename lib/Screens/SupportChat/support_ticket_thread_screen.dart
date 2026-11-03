@@ -30,6 +30,7 @@ class _SupportTicketThreadScreenState extends State<SupportTicketThreadScreen> {
   SupportSocket? _socket;
 
   List<SupportMessage> _messages = [];
+  List<String> _followUps = [];
   bool _loading = true;
   bool _sending = false;
 
@@ -49,10 +50,11 @@ class _SupportTicketThreadScreenState extends State<SupportTicketThreadScreen> {
   }
 
   Future<void> _load() async {
-    final msgs = await _service.getMessages(widget.ticketId);
+    final (msgs, followUps) = await _service.getMessages(widget.ticketId);
     if (!mounted) return;
     setState(() {
       _messages = msgs;
+      _followUps = followUps;
       _loading = false;
     });
     _scrollToBottom();
@@ -67,8 +69,9 @@ class _SupportTicketThreadScreenState extends State<SupportTicketThreadScreen> {
     _scrollToBottom();
   }
 
-  Future<void> _send() async {
-    final text = _controller.text.trim();
+  /// Sends what's typed, or [chip] when a follow-up chip was tapped.
+  Future<void> _send([String? chip]) async {
+    final text = (chip ?? _controller.text).trim();
     if (text.isEmpty || _sending) return;
     setState(() => _sending = true);
 
@@ -80,7 +83,7 @@ class _SupportTicketThreadScreenState extends State<SupportTicketThreadScreen> {
     );
     setState(() {
       _messages = [..._messages, optimistic];
-      _controller.clear();
+      if (chip == null) _controller.clear();
     });
     _scrollToBottom();
 
@@ -178,6 +181,30 @@ class _SupportTicketThreadScreenState extends State<SupportTicketThreadScreen> {
                         itemBuilder: (_, i) => _bubble(_messages[i]),
                       ),
           ),
+          // After a support reply, quick answers for this issue; typing
+          // works too.
+          if (_followUps.isNotEmpty &&
+              _messages.isNotEmpty &&
+              !_messages.last.isMe)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final f in _followUps)
+                    ActionChip(
+                      label: Text(f, style: const TextStyle(fontSize: 13)),
+                      onPressed: _sending ? null : () => _send(f),
+                      backgroundColor:
+                          AppColors.appColor.withValues(alpha: 0.08),
+                      side: BorderSide(
+                          color: AppColors.appColor.withValues(alpha: 0.3)),
+                    ),
+                ],
+              ),
+            ),
           _input(),
         ],
       ),
