@@ -3,6 +3,7 @@ import 'package:movezy_driver_app/CommonWidgets/panic_button.dart';
 import 'package:movezy_driver_app/AppNavigation/app_navigation.dart';
 import 'package:movezy_driver_app/Screens/CollectedCaseScreen/collected_case_screen.dart';
 import 'package:movezy_driver_app/Screens/ChatScreen/chat_screen.dart';
+import 'package:movezy_driver_app/CommonWidgets/contact_call_row.dart';
 import 'package:movezy_driver_app/Services/masked_call_service.dart';
 import 'package:movezy_driver_app/Screens/TechnicianDashboard/technician_dashboard.dart';
 import 'package:flutter/material.dart';
@@ -57,6 +58,11 @@ class _VerifyRideScreenState extends State<VerifyRideScreen> {
   String pinValue = "";
   bool _verifying = false;
 
+  /// Sender at pickup when the customer named someone else; loaded from the
+  /// booking, empty until then (and for the customer's own number).
+  String _senderName = '';
+  String _senderPhone = '';
+
   /// A previous attempt already passed the OTP gate (server flipped the
   /// booking to PICKED). A retried verify then fails with "invalid booking"
   /// even though the code was right — treat that retry as verified instead of
@@ -67,6 +73,22 @@ class _VerifyRideScreenState extends State<VerifyRideScreen> {
   static const _grayShade2 = Color(0xFF364B63);
   static const _grayShade4 = Color(0xFF94A3B3);
   static const _grayBorder = Color(0xFFE1E6EF);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSender();
+  }
+
+  Future<void> _loadSender() async {
+    final b = await _apiService.getBookingDetails(widget.bookingId);
+    final pickup = b?['pickup'];
+    if (!mounted || pickup is! Map) return;
+    setState(() {
+      _senderName = (pickup['contactName'] ?? '').toString().trim();
+      _senderPhone = ContactCallRow.phoneOf(pickup['contactPhone']);
+    });
+  }
 
   /// Pickup time to show, as (label, formatted time). Prefers the scheduled slot
   /// and falls back to when the booking was placed. Returns null when neither
@@ -294,6 +316,12 @@ class _VerifyRideScreenState extends State<VerifyRideScreen> {
                           ),
                         ],
                       ),
+                      if (_senderPhone.isNotEmpty)
+                        ContactCallRow(
+                          label: 'Sender at pickup',
+                          name: _senderName,
+                          phone: _senderPhone,
+                        ),
                       const SizedBox(height: 14),
                       Align(
                         alignment: Alignment.centerLeft,

@@ -49,6 +49,13 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
   // The admin catalog id for the selected type — this is what dispatch matches
   // on, so it must be submitted with the RC rather than the display name.
   String? vehicleTypeId;
+
+  /// Category picked first (2W / 3W / 4W / HV); the vehicle list below it
+  /// shows only that category's vehicles.
+  String? vehicleCategory;
+
+  /// Categories with at least one active vehicle, in the shared order.
+  List<Map<String, String>> _categories = [];
   String? oilType;
   String? bodyType;
 
@@ -131,15 +138,20 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                   'name': (v['name'] ?? '').toString(),
                   // 2W / 3W / 4W / HV — drives the Scooter/Bike + Petrol/Electric rules.
                   'categoryCode': (v['categoryCode'] ?? '').toString(),
+                  'maxWeightKg': (v['maxWeightKg'] ?? '').toString(),
+                  'lengthFt': (v['lengthFt'] ?? '').toString(),
                 },
               )
               .where((v) => v['id']!.isNotEmpty && v['name']!.isNotEmpty)
               .toList();
+          _orderTypes();
+          _categories = _categoriesFrom(data['vehicleCategories']);
           if (widget.existingVehicle != null) {
             final match = vehicleTypeList.where(
               (v) => v['id'] == vehicleTypeId,
             );
             vehicleType = match.isEmpty ? null : match.first['name'];
+            vehicleCategory = match.isEmpty ? null : match.first['categoryCode'];
             if (!cityList.contains(selectedCity)) selectedCity = null;
           }
           _applyTypeRules();
@@ -184,9 +196,98 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
     return null;
   }
 
-  /// "2 Wheeler – Scooter": two-wheeler types are shown as sub-categories.
-  String _typeLabel(Map<String, String> v) =>
-      v['categoryCode'] == '2W' ? '2 Wheeler – ${v['name']}' : v['name']!;
+  static const _categoryOrder = ['2W', '3W', '4W', 'HV'];
+  static const _categoryLabels = {
+    '2W': '2 Wheeler',
+    '3W': '3 Wheeler',
+    '4W': '4 Wheeler',
+    'HV': 'Heavy Vehicle',
+  };
+
+  /// Categories by size, then smallest to largest by load capacity — the same
+  /// order the server and admin use.
+  void _orderTypes() {
+    int rank(Map<String, String> v) {
+      final i = _categoryOrder.indexOf(v['categoryCode'] ?? '');
+      return i == -1 ? _categoryOrder.length : i;
+    }
+
+    double num(String? s) => double.tryParse(s ?? '') ?? 0;
+    vehicleTypeList.sort((a, b) {
+      final byRank = rank(a).compareTo(rank(b));
+      if (byRank != 0) return byRank;
+      final byWeight = num(a['maxWeightKg']).compareTo(num(b['maxWeightKg']));
+      if (byWeight != 0) return byWeight;
+      return num(a['lengthFt']).compareTo(num(b['lengthFt']));
+    });
+  }
+
+  /// The server's category list, or (older server) the categories the active
+  /// vehicles belong to.
+  List<Map<String, String>> _categoriesFrom(dynamic raw) {
+    final fromServer = ((raw as List?) ?? [])
+        .whereType<Map>()
+        .map((c) => {
+              'code': (c['code'] ?? '').toString(),
+              'name': (c['name'] ?? '').toString(),
+            })
+        .where((c) => c['code']!.isNotEmpty && c['name']!.isNotEmpty)
+        .toList();
+    if (fromServer.isNotEmpty) return fromServer;
+    return _categoryOrder
+        .where((code) => vehicleTypeList.any((v) => v['categoryCode'] == code))
+        .map((code) => {'code': code, 'name': _categoryLabels[code]!})
+        .toList();
+  }
+
+  List<Map<String, String>> get _vehiclesInCategory => vehicleTypeList
+      .where((v) => v['categoryCode'] == vehicleCategory)
+      .toList();
+
+  void _selectVehicle(String? id) {
+    vehicleTypeId = id;
+    // Keep the name too — the KYC RC record still stores the coarse type
+    // string (vehicalId).
+    vehicleType = id == null
+        ? null
+        : vehicleTypeList.firstWhere(
+            (v) => v['id'] == id,
+            orElse: () => {'name': ''},
+          )['name'];
+    _applyTypeRules();
+  }
+
+  InputDecoration get _dropdownDecoration => const InputDecoration(
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
+        errorBorder: InputBorder.none,
+        focusedErrorBorder: InputBorder.none,
+        isDense: true,
+        contentPadding: EdgeInsets.zero,
+      );
+
+  Widget _dropdownBox(Widget child) => Container(
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(
+          border: Border.all(color: HexColor("#E1E6EF"), width: 1.5),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        margin: const EdgeInsets.only(left: 15, right: 15),
+        child: child,
+      );
+
+  Widget _fieldLabel(String text) => Container(
+        margin: const EdgeInsets.only(left: 15, bottom: 6),
+        child: Text(
+          text,
+          style: const TextStyle(
+            color: Colors.black,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
 
   /// Two-wheelers are Scooter/Bike on Petrol or Electric; everything else keeps
   /// Open/Closed bodies and the full fuel list. A selection that no longer
@@ -733,43 +834,13 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
 
                           SizedBox(height: 15),
 
-                          Container(
-                            margin: EdgeInsets.only(left: 15, bottom: 6),
-                            child: Text(
-                              'select_vehicle_type'.tr,
-                              style: TextStyle(
-                                color: Colors.black,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-
-                          Container(
-                            padding: EdgeInsets.only(
-                              left: 15,
-                              right: 15,
-                              bottom: 15,
-                              top: 15,
-                            ),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: HexColor("#E1E6EF"),
-                                width: 1.5,
-                              ),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            margin: EdgeInsets.only(left: 15, right: 15),
-                            child: DropdownButtonFormField<String>(
-                              decoration: InputDecoration(
-                                border: InputBorder.none,
-                                enabledBorder: InputBorder.none,
-                                focusedBorder: InputBorder.none,
-                                errorBorder: InputBorder.none,
-                                focusedErrorBorder: InputBorder.none,
-                                isDense: true,
-                                contentPadding: EdgeInsets.zero,
-                              ),
+                          // Category first (2 Wheeler, 3 Wheeler, 4 Wheeler, Heavy
+                          // Vehicle), then the admin's vehicles in it, smallest
+                          // first (client decision, 2026-11-04).
+                          _fieldLabel('select_vehicle_category'.tr),
+                          _dropdownBox(
+                            DropdownButtonFormField<String>(
+                              decoration: _dropdownDecoration,
                               hint: Text(
                                 'choose_one'.tr,
                                 style: TextStyle(
@@ -777,13 +848,13 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                                   color: HexColor("#607080"),
                                 ),
                               ),
-                              initialValue: vehicleTypeId,
-                              items: vehicleTypeList
+                              initialValue: vehicleCategory,
+                              items: _categories
                                   .map(
-                                    (item) => DropdownMenuItem(
-                                      value: item['id'],
+                                    (c) => DropdownMenuItem(
+                                      value: c['code'],
                                       child: Text(
-                                        _typeLabel(item),
+                                        c['name']!,
                                         style: TextStyle(
                                           fontSize: 13,
                                           color: HexColor("#607080"),
@@ -794,16 +865,59 @@ class _AddVehicleDetailsScreenState extends State<AddVehicleDetailsScreen> {
                                   .toList(),
                               onChanged: (value) {
                                 setState(() {
-                                  vehicleTypeId = value;
-                                  // Keep the name too — the KYC RC record still stores
-                                  // the coarse type string (vehicalId).
-                                  vehicleType = vehicleTypeList.firstWhere(
-                                    (v) => v['id'] == value,
-                                    orElse: () => {'name': ''},
-                                  )['name'];
-                                  _applyTypeRules();
+                                  vehicleCategory = value;
+                                  final inCategory = _vehiclesInCategory;
+                                  final keep = inCategory.any((v) => v['id'] == vehicleTypeId);
+                                  // One vehicle in the category: nothing to choose.
+                                  _selectVehicle(keep
+                                      ? vehicleTypeId
+                                      : inCategory.length == 1
+                                          ? inCategory.first['id']
+                                          : null);
                                 });
                               },
+                              validator: (value) => value == null
+                                  ? 'please_select_option'.tr
+                                  : null,
+                            ),
+                          ),
+
+                          SizedBox(height: 15),
+
+                          _fieldLabel('select_vehicle'.tr),
+                          _dropdownBox(
+                            DropdownButtonFormField<String>(
+                              // Rebuilt per category, so the list and the
+                              // selection always match the category above.
+                              key: ValueKey('vehicle-$vehicleCategory'),
+                              decoration: _dropdownDecoration,
+                              hint: Text(
+                                vehicleCategory == null
+                                    ? 'select_category_first'.tr
+                                    : 'choose_one'.tr,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: HexColor("#607080"),
+                                ),
+                              ),
+                              initialValue: vehicleTypeId,
+                              items: _vehiclesInCategory
+                                  .map(
+                                    (item) => DropdownMenuItem(
+                                      value: item['id'],
+                                      child: Text(
+                                        item['name']!,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: HexColor("#607080"),
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: vehicleCategory == null
+                                  ? null
+                                  : (value) => setState(() => _selectVehicle(value)),
                               validator: (value) => value == null
                                   ? 'please_select_option'.tr
                                   : null,

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:movezy_driver_app/CommonWidgets/panic_button.dart';
+import 'package:movezy_driver_app/CommonWidgets/contact_call_row.dart';
 import 'package:movezy_driver_app/Screens/ChatScreen/chat_screen.dart';
 import 'package:movezy_driver_app/CommonWidgets/trip_support_sheet.dart';
 import 'package:movezy_driver_app/Services/masked_call_service.dart';
@@ -384,6 +385,10 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
     if (u is Map && u['fullName'] != null) return u['fullName'].toString();
     return 'Customer';
   }
+
+  /// Receiver at the drop when the customer named someone else.
+  String get _receiverName => (_booking?['receiverName'] ?? '').toString().trim();
+  String get _receiverPhone => ContactCallRow.phoneOf(_booking?['receiverPhone']);
 
   String get _customerPhone {
     final u = _booking?['userId'];
@@ -1273,6 +1278,12 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
                   ),
                 ],
               ),
+              if (!_isOnStopLeg && _receiverPhone.isNotEmpty)
+                ContactCallRow(
+                  label: 'Receiver at drop',
+                  name: _receiverName,
+                  phone: _receiverPhone,
+                ),
 
               // Money strip — what the driver must (or must not) collect.
               // Kept from the old screen: dropping it to match the mock would
