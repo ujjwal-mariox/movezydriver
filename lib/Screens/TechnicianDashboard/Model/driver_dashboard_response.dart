@@ -473,13 +473,21 @@ class BookingLocation {
   final String contactName;
   final String contactPhone;
 
+  /// House / apartment / shop line the customer typed under the map address.
+  final String addressLine;
+
   BookingLocation({
     required this.address,
     required this.lat,
     required this.lng,
     required this.contactName,
     required this.contactPhone,
+    this.addressLine = '',
   });
+
+  /// The line first ("Flat 12, Sai Heights"), then the map address.
+  String get fullAddress =>
+      addressLine.trim().isEmpty ? address : '${addressLine.trim()}, $address';
 
   factory BookingLocation.fromJson(Map<String, dynamic> json) {
     return BookingLocation(
@@ -488,6 +496,7 @@ class BookingLocation {
       lng: _toDouble(json['lng']),
       contactName: json['contactName']?.toString() ?? '',
       contactPhone: json['contactPhone']?.toString() ?? '',
+      addressLine: json['addressLine']?.toString() ?? '',
     );
   }
 }

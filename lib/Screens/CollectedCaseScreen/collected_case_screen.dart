@@ -255,10 +255,13 @@ class _AmountToBeCollectedScreenState extends State<AmountToBeCollectedScreen> {
     return null;
   }
 
+  /// The drop, led by the customer's House / Apartment / Shop line if any.
   String get _dropAddress {
     final d = _booking?['drop'];
-    if (d is Map && d['address'] != null) return d['address'].toString();
-    return '';
+    if (d is! Map || d['address'] == null) return '';
+    final line = (d['addressLine'] ?? '').toString().trim();
+    final address = d['address'].toString();
+    return line.isEmpty ? address : '$line, $address';
   }
 
   // ── Multi-stop legs ──

@@ -64,7 +64,7 @@ class _PickupTripSheetState extends State<PickupTripSheet> {
   ].join(' • ');
   String get _customer => _text(booking.customerName) ?? 'Customer';
   String get _address =>
-      _text(_headingToPickup ? booking.pickup.address : booking.drop.address) ??
+      _text(_headingToPickup ? booking.pickup.fullAddress : booking.drop.fullAddress) ??
       _text(_headingToPickup ? booking.pickupAddress : booking.dropAddress) ??
       'Address unavailable';
   bool get _hasLoading =>
@@ -484,7 +484,7 @@ class _PickupTripSheetState extends State<PickupTripSheet> {
     _customerRow(full: true),
     _section('pickup'.tr.toUpperCase()),
     Text(
-      _text(booking.pickup.address) ??
+      _text(booking.pickup.fullAddress) ??
           _text(booking.pickupAddress) ??
           'Address unavailable',
       style: const TextStyle(fontSize: 16, height: 1.4),
@@ -497,7 +497,7 @@ class _PickupTripSheetState extends State<PickupTripSheet> {
     ),
     _section('DROP'),
     Text(
-      _text(booking.drop.address) ??
+      _text(booking.drop.fullAddress) ??
           _text(booking.dropAddress) ??
           'Address unavailable',
       style: const TextStyle(fontSize: 16, height: 1.4),
