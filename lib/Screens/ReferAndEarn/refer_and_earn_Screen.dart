@@ -21,6 +21,10 @@ class ReferAndEarnScreen extends StatefulWidget {
 class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
   bool _loading = true;
   String _referralCode = '';
+
+  /// The admin-written message (Settings → Referral share messages) with this
+  /// partner's code and links filled in. Empty from an older server.
+  String _serverShareMessage = '';
   int _referralCount = 0;
   double _totalEarnings = 0;
   int _referrerReward = 100;
@@ -46,6 +50,7 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
         final data = body['data'] ?? body;
         setState(() {
           _referralCode = data['referralCode'] ?? '';
+          _serverShareMessage = (data['shareMessage'] ?? '').toString();
           _referralCount = data['referralCount'] ?? 0;
           _totalEarnings = (data['totalEarnings'] ?? 0).toDouble();
           _referrerReward = data['referrerRewardAmount'] ?? 100;
@@ -69,21 +74,20 @@ class _ReferAndEarnScreenState extends State<ReferAndEarnScreen> {
     );
   }
 
+  /// One message for every channel, so WhatsApp and the share sheet match.
+  String get _shareMessage => _serverShareMessage.isNotEmpty
+      ? _serverShareMessage
+      : 'Join Movezy as a driver using my referral code: $_referralCode and earn ₹$_refereeReward! Download the app now.';
+
   void _shareCode() {
     if (_referralCode.isEmpty) return;
-    SharePlus.instance.share(
-      ShareParams(
-        text: 'Join Movezy as a driver using my referral code: $_referralCode and earn ₹$_refereeReward! Download the app now.',
-      ),
-    );
+    SharePlus.instance.share(ShareParams(text: _shareMessage));
   }
 
   /// Direct WhatsApp share - 1 tap sharing
   Future<void> _shareOnWhatsApp() async {
     if (_referralCode.isEmpty) return;
-    final message = Uri.encodeComponent(
-      'Join Movezy as a driver using my referral code: $_referralCode and earn ₹$_refereeReward! Download the app now.',
-    );
+    final message = Uri.encodeComponent(_shareMessage);
     final whatsappUrl = Uri.parse('whatsapp://send?text=$message');
     
     if (await canLaunchUrl(whatsappUrl)) {
